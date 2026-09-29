@@ -37,6 +37,15 @@ interface MinecraftBridge {
 	/** Sale del mundo/servidor actual. */
 	fun disconnect()
 
+	/**
+	 * Reaparece si el jugador esta muerto.
+	 *
+	 * Falla con `409 not_dead` si sigue vivo, y con `409 not_connected` si no hay
+	 * mundo. Es idempotente en el sentido de que repetirla sobre un jugador vivo
+	 * no hace daño: simplemente se rechaza.
+	 */
+	fun respawn()
+
 	/** Jugadores actualmente en el tab list. */
 	fun onlinePlayers(): List<RemotePlayerInfo>
 
@@ -100,6 +109,8 @@ data class ClientStatus(
 	val playerCount: Int,
 	val maxPlayers: Int,
 	val windowActive: Boolean,
+	/** `true` si hay jugador y tiene 0 de vida. Permite encadenar con `/respawn`. */
+	val dead: Boolean = false,
 ) {
 	fun toJson(): JsonObject = JsonObject().apply {
 		addProperty("modVersion", modVersion)
@@ -116,6 +127,7 @@ data class ClientStatus(
 		addProperty("playerCount", playerCount)
 		addProperty("maxPlayers", maxPlayers)
 		addProperty("windowActive", windowActive)
+		addProperty("dead", dead)
 	}
 }
 

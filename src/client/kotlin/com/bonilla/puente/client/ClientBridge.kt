@@ -62,7 +62,27 @@ class ClientBridge(
 			playerCount = level?.players()?.size ?: 0,
 			maxPlayers = serverData?.players?.max() ?: 0,
 			windowActive = mc.isWindowActive,
+			dead = player != null && !player.isAlive(),
 		)
+	}
+
+	override fun respawn() {
+		val mc = Minecraft.getInstance()
+		val player = mc.player
+			?: throw PuenteException(409, "not_connected", "El cliente no esta en ningun mundo")
+
+		// `LocalPlayer.respawn()` envia un ServerboundClientCommandPacket de tipo
+		// respawn. Si el jugador sigue vivo el servidor lo rechaza, asi que se
+		// comprueba antes: mejor un 409 explicito que un error opaco del servidor.
+		if (player.isAlive()) {
+			throw PuenteException(
+				409, "not_dead",
+				"El jugador no esta muerto: no hay nada que reaparecer",
+			)
+		}
+
+		player.respawn()
+		logger.info("Reaparicion solicitada por la API HTTP")
 	}
 
 	override fun sendChat(message: String) {

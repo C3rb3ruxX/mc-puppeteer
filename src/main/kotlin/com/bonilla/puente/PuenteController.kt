@@ -95,6 +95,16 @@ class PuenteController(
 		mainThread.callOnMainThread { bridge.disconnect() }
 	}
 
+	/**
+	 * Reaparece tras morir.
+	 *
+	 * Lanza `409 not_dead` si el jugador sigue vivo, para que un bucle de
+	 * supervision pueda preguntar sin miedo a Provocar un error del servidor.
+	 */
+	fun respawn() {
+		mainThread.callOnMainThread { bridge.respawn() }
+	}
+
 	/** Identidad actual con la que se presentara el cliente al conectar. */
 	fun playerIdentity(): PlayerIdentity = mainThread.callOnMainThread { bridge.playerIdentity() }
 

@@ -20,7 +20,7 @@ red de pruebas) que:
 1. construye un `MinecraftBridge` **falso** que solo registra en que hilo se
    le llamo,
 2. levanta un `PuenteHttpServer` real en `127.0.0.1:25599`,
-3. le manda 169 peticiones con `java.net.http.HttpClient`,
+3. le manda 179 peticiones con `java.net.http.HttpClient`,
 4. comprueba estado HTTP, codigo de error y contenido,
 5. comprueba que el buffer acotado se comporta,
 6. comprueba que los comandos de Baritone se traducen y salen por chat,
@@ -64,7 +64,7 @@ coincide con el del fichero (`PuenteSmokeTest`), que es lo que exige Java
 para una clase publica; el comando de arriba invoca ese nombre.
 
 Hubo antes una copia en `%TEMP%\opencode\SmokeTest.java` con el nombre corto
-`SmokeTest`. Esa variante daba 169/169 igual, pero rompia el comando documentado
+`SmokeTest`. Esa variante daba 179/179 igual, pero rompia el comando documentado
 en cuanto se copiaba al repositorio, porque `javac` no acepta una clase
 publica cuyo nombre no coincida con el del `.java`. Se renombro al integrarla.
 
@@ -118,7 +118,7 @@ publica cuyo nombre no coincida con el del `.java`. Se renombro al integrarla.
   corregirlo, la prueba fallo: senal de que la prueba vigilaba el valor
   equivocado, no el correcto.
 
-### Identidad offline (10)
+### Identidad offline (10) y reaparicion (10)
 - `GET /profile` devuelve nombre y UUID actuales.
 - `POST /profile {"name":"Tester1"}` cambia el nombre y `GET` lo confirma.
 - Acepta digitos y guion bajo (`Tester_2`).
@@ -141,6 +141,15 @@ Lo que **no** cubren, y no se puede con este banco:
   contra `UUIDUtil.createOfflinePlayerUUID`, que coincide con
   `nameUUIDFromBytes("OfflinePlayer:" + nombre)`.
 - Que al conectar de verdad el servidor acepte la identidad. Requiere juego.
+
+Reaparicion (10): sin mundo -> `409 not_connected`; con el jugador vivo ->
+`409 not_dead` y sin contar como reaparicion; `/status` expone `dead` en `false`
+y en `true`; muerto -> `202`; tras reaparecer `dead` vuelve a `false`; repetir en
+vida -> `409` sin contar como segundo; `GET /respawn` -> `405`.
+
+Lo que **no** cubren: que el servidor acepte el paquete de reaparicion. El banco
+comprueba el contrato HTTP y que se llame al puente, no que `LocalPlayer.respawn()`
+llegue a hacer reaparecer de verdad. Eso necesita morir en juego.
 
 ### Desconexion (1)
 - `POST /disconnect` devuelve `202`.

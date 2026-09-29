@@ -48,15 +48,19 @@ public class PuenteSmokeTest {
 			@Override public boolean isMainThread() { return false; }
 		};
 
+		// Estado de identidad que el harness va cambiando con POST /profile.
+		AtomicBoolean inWorld = new AtomicBoolean(false);
+		// `isDead` lo cambia la prueba via POST /respawn para simular la muerte.
+		AtomicBoolean isDead = new AtomicBoolean(false);
+		AtomicInteger respawns = new AtomicInteger(0);
 		MinecraftBridge bridge = new MinecraftBridge() {
-			// Estado de identidad que el harness va cambiando con POST /profile.
 			String profileName = "Steve";
 			String profileUuid = "uuid-1";
-			AtomicBoolean inWorld = new AtomicBoolean(false);
 			@Override public ClientStatus status() {
 				onMainThreadCalls.incrementAndGet();
 				return new ClientStatus("1.0.0", "26.3", true, "ChatScreen", "Steve", "uuid-1",
-					"localhost:25565", "Mi servidor", null, "minecraft:overworld", 144, 3, 20, true);
+					"localhost:25565", "Mi servidor", null, "minecraft:overworld", 144, 3, 20, true,
+					isDead.get());
 			}
 			@Override public void sendChat(String m) {
 				onMainThreadCalls.incrementAndGet();
@@ -76,6 +80,18 @@ public class PuenteSmokeTest {
 			@Override public void disconnect() {
 				onMainThreadCalls.incrementAndGet();
 				checkOnMain("disconnect");
+			}
+			@Override public void respawn() {
+				onMainThreadCalls.incrementAndGet();
+				checkOnMain("respawn");
+				if (!inWorld.get()) {
+					throw new PuenteException(409, "not_connected", "El cliente no esta en ningun mundo");
+				}
+				if (!isDead.get()) {
+					throw new PuenteException(409, "not_dead", "El jugador no esta muerto: no hay nada que reaparecer");
+				}
+				isDead.set(false);
+				respawns.incrementAndGet();
 			}
 			@Override public List<RemotePlayerInfo> onlinePlayers() {
 				onMainThreadCalls.incrementAndGet();
@@ -256,6 +272,44 @@ public class PuenteSmokeTest {
 
 		r = call("DELETE", "/profile", null, true);
 		check("[27j] DELETE /profile -> 405", r.status() == 405, r.status() + " " + r.body());
+
+		// --- reaparicion ------------------------------------------------------
+		r = call("POST", "/respawn", null, true);
+		check("[27k] respawn sin mundo -> 409 not_connected",
+			r.status() == 409 && r.body().contains("not_connected"), r.body());
+
+		inWorld.set(true);
+		r = call("POST", "/respawn", null, true);
+		check("[27l] respawn con el jugador vivo -> 409 not_dead",
+			r.status() == 409 && r.body().contains("not_dead"), r.body());
+		check("[27m] un 409 not_dead no cuenta como reaparicion", respawns.get() == 0, "respawns=" + respawns.get());
+
+		// Con `dead` en /status se puede supervisar la muerte sin adivinar.
+		r = call("GET", "/status", null, true);
+		check("[27n] /status expone dead=false con el jugador vivo",
+			r.status() == 200 && r.body().contains("\"dead\":false"), r.body());
+
+		isDead.set(true);
+		r = call("GET", "/status", null, true);
+		check("[27o] /status expone dead=true tras morir",
+			r.status() == 200 && r.body().contains("\"dead\":true"), r.body());
+
+		r = call("POST", "/respawn", null, true);
+		check("[27p] respawn con el jugador muerto -> 202",
+			r.status() == 202 && r.body().contains("\"respawning\":true"), r.body());
+		check("[27q] el puente reaparece al jugador", respawns.get() == 1, "respawns=" + respawns.get());
+		check("[27r] tras reaparecer dead vuelve a false", !isDead.get(), "isDead=" + isDead.get());
+
+		r = call("POST", "/respawn", null, true);
+		check("[27s] repetir respawn en vida -> 409 not_dead y no cuenta como segundo respawn",
+			r.status() == 409 && r.body().contains("not_dead") && respawns.get() == 1,
+			r.status() + " respawns=" + respawns.get());
+
+		r = call("GET", "/respawn", null, true);
+		check("[27t] GET /respawn -> 405, reaparecer no es idempotente por GET",
+			r.status() == 405, r.status() + " " + r.body());
+
+		inWorld.set(false);
 
 		// --- errores de transporte -----------------------------------------
 		r = call("DELETE", "/status", null, true);
@@ -562,14 +616,17 @@ public class PuenteSmokeTest {
 		check("[" + n + "] el puente se invoco siempre desde el hilo principal", onMainThreadCalls.get() > 0,
 			onMainThreadCalls.get() + " llamadas");
 		n++;
-		// 10 base + 7 de /profile + 3 de /connect sin puerto + las de Baritone.
+		// 10 base + 7 de /profile + 3 de /connect sin puerto + 6 de /respawn y /status
+		// + las de Baritone.
 		// De /profile llegan 7: 2 GET + 2 POST validos + 3 POST con nombre de
 		// formato invalido. Los 3 si pasan por el puente a proposito, porque el
 		// patron de nombre se valida en `ClientBridge` (que es quien conoce
 		// `SharedConstants.MAX_PLAYER_NAME_LENGTH`), y por tanto en el hilo
 		// principal. Los 2 que no llegan son los que el controlador corta antes
 		// (nombre vacio o ausente), que no dependen de MC.
-		int profileCalls = 7 + 3;
+		// De /respawn llegan 6: 4 POST (2 rechazados + 1 bueno + 1 repetido) y 2 GET
+		// /status. El GET /respawn es 405 y no llega al puente.
+		int profileCalls = 7 + 3 + 6;
 		check("[" + n + "] llamadas al puente = 10 base + " + profileCalls + " de perfil/connect + " + dispatched + " de Baritone",
 			onMainThreadCalls.get() == 10 + profileCalls + dispatched, String.valueOf(onMainThreadCalls.get()));
 		n++;

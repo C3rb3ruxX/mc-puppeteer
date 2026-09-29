@@ -80,6 +80,7 @@ esperas, un `null` en `screen` es normal, no un error.
 | `POST` | `/command` | Envia un comando. |
 | `POST` | `/connect` | Conecta a un servidor. |
 | `POST` | `/disconnect` | Sale al titulo. |
+| `POST` | `/respawn` | Reaparece si el personaje esta muerto. |
 | `GET` | `/profile` | Identidad con la que se conectara el cliente. |
 | `POST` | `/profile` | Cambia el nombre **en caliente** (solo offline). |
 | `GET` | `/debug` | Estado interno del buffer de chat. |
@@ -320,6 +321,46 @@ Un nombre invalido devuelve `400 invalid_player_name` y **no** cambia nada.
 Ojo con la distincion: `GET /status` devuelve `playerName`, que es el jugador
 **ya conectado**. `/profile` devuelve la identidad con la que se presentara el
 cliente, que puede ser distinta.
+
+### `POST /respawn`
+
+Reaparece si el personaje esta muerto.
+
+```powershell
+curl.exe -s -X POST "$BASE/respawn" -H $AUTH
+```
+
+```json
+{ "ok": true, "data": { "respawning": true } }
+```
+
+Por debajo llama a `LocalPlayer.respawn()`, que es lo que hace el boton
+"Respawn" de la pantalla de muerte: envia el `ServerboundClientCommandPacket`
+correspondiente y cierra la pantalla. No hay que replicar nada a mano.
+
+`GET /status` incluye ahora `dead`, asi que un bucle de supervision puede
+detectar la muerte sin adivinar:
+
+```powershell
+while ($true) {
+  $s = Invoke-RestMethod "$BASE/status" -Headers @{ Authorization = "Bearer $TOKEN" }
+  if ($s.data.dead) {
+    curl.exe -s -X POST "$BASE/respawn" -H $AUTH | Out-Null
+  }
+  Start-Sleep 2
+}
+```
+
+**Errores deliberados**, para que un bucle pueda preguntar sin miedo:
+
+| Situacion | Respuesta |
+|---|---|
+| No hay mundo | `409 not_connected` |
+| El jugador sigue vivo | `409 not_dead` |
+
+Repetir el respawn sobre un jugador vivo **no** reenvia nada: se rechaza antes
+de tocar la red. Es `POST` y no `GET` porque reaparecer cambia el estado de la
+sesion; un refresco de pagina o un prefetch no deberian poder dispararlo.
 
 ### `GET /debug`
 

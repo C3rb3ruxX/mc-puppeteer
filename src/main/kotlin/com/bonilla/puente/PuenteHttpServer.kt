@@ -215,6 +215,15 @@ class PuenteHttpServer(
 				send(exchange, 202, okBody(JsonObject().apply { addProperty("disconnected", true) }))
 			}
 
+			// --- Reaparicion ---------------------------------------------------
+			// POST y no GET: reaparecer cambia el estado de la sesion. Un GET
+			// podria ejecutarse por un refresco de pagina o un prefetch.
+			"/respawn" -> {
+				requireMethod(exchange, "POST")
+				controller.respawn()
+				send(exchange, 202, okBody(JsonObject().apply { addProperty("respawning", true) }))
+			}
+
 			// --- Identidad de la sesion ---------------------------------------
 			"/profile" -> {
 				requireMethod(exchange, "GET", "POST")
