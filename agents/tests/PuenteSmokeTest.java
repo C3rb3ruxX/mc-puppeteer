@@ -8,6 +8,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /** Prueba de humo del nucleo HTTP con un puente falso, fuera de Minecraft. */
@@ -48,6 +49,10 @@ public class PuenteSmokeTest {
 		};
 
 		MinecraftBridge bridge = new MinecraftBridge() {
+			// Estado de identidad que el harness va cambiando con POST /profile.
+			String profileName = "Steve";
+			String profileUuid = "uuid-1";
+			AtomicBoolean inWorld = new AtomicBoolean(false);
 			@Override public ClientStatus status() {
 				onMainThreadCalls.incrementAndGet();
 				return new ClientStatus("1.0.0", "26.3", true, "ChatScreen", "Steve", "uuid-1",
@@ -75,6 +80,23 @@ public class PuenteSmokeTest {
 			@Override public List<RemotePlayerInfo> onlinePlayers() {
 				onMainThreadCalls.incrementAndGet();
 				return List.of(new RemotePlayerInfo("Alex", "uuid-2", 42, "Alex"));
+			}
+			@Override public PlayerIdentity playerIdentity() {
+				onMainThreadCalls.incrementAndGet();
+				checkOnMain("playerIdentity");
+				return new PlayerIdentity(profileName, profileUuid, false);
+			}
+			@Override public PlayerIdentity setPlayerName(String name) {
+				onMainThreadCalls.incrementAndGet();
+				checkOnMain("setPlayerName " + name);
+				// Mismo criterio que `ClientBridge`: solo [A-Za-z0-9_]{1,16}.
+				if (!name.matches("[A-Za-z0-9_]{1,16}")) {
+					throw new PuenteException(400, "invalid_player_name", "Nombre invalido '" + name + "'");
+				}
+				profileName = name;
+				// UUID v3 determinista, suficiente para el harness.
+				profileUuid = "uuid-" + name;
+				return new PlayerIdentity(profileName, profileUuid, inWorld.get());
 			}
 			@Override public void dispose() {}
 		};
@@ -163,8 +185,11 @@ public class PuenteSmokeTest {
 		check("[22] connect IPv6 con puerto -> 202 [::1]:25566", r.status() == 202 && r.body().contains("[::1]:25566"), r.body());
 
 		r = call("POST", "/connect", "{\"address\":\"juego.mc\"}", true);
-		check("[23] connect sin puerto -> 202 con puerto por defecto 25580",
-			r.status() == 202 && r.body().contains("juego.mc:25580"), r.body());
+		// Esta asercion fijaba 25580 (el puerto del HTTP), que era un bug. Ahora
+		// el puerto por defecto del juego es 25565. Los otros dos caminos sin
+		// puerto se cubren en 26a-26c.
+		check("[23] connect sin puerto -> 202 con puerto por defecto 25565",
+			r.status() == 202 && r.body().contains("juego.mc:25565"), r.body());
 
 		r = call("POST", "/connect", "{\"host\":\"servidor\",\"port\":25577,\"name\":\"Custom\"}", true);
 		check("[24] connect host/port/nombre -> 202", r.status() == 202 && r.body().contains("servidor:25577"), r.body());
@@ -175,8 +200,62 @@ public class PuenteSmokeTest {
 		r = call("POST", "/connect", "{\"address\":\"host:abc\"}", true);
 		check("[26] connect puerto no numerico -> 400", r.status() == 400, r.body());
 
+		// Sin puerto explicito debe usarse 25565 (Minecraft), no 25580 (el puerto
+		// del servidor HTTP de Puente). Antes de corregirlo, estas tres formas
+		// caian en 25580.
+		r = call("POST", "/connect", "{\"host\":\"servidor\"}", true);
+		check("[26a] connect sin puerto usa 25565, no 25580",
+			r.status() == 202 && r.body().contains("servidor:25565") && !r.body().contains("25580"), r.body());
+
+		r = call("POST", "/connect", "{\"address\":\"otro.servidor\"}", true);
+		check("[26b] address sin puerto usa 25565",
+			r.status() == 202 && r.body().contains("otro.servidor:25565"), r.body());
+
+		r = call("POST", "/connect", "{\"address\":\"[::1]\"}", true);
+		check("[26c] IPv6 sin puerto usa 25565",
+			r.status() == 202 && r.body().contains("[::1]:25565"), r.body());
+
 		r = call("POST", "/disconnect", null, true);
 		check("[27] POST /disconnect -> 202", r.status() == 202, r.body());
+
+		// --- identidad offline ----------------------------------------------
+		r = call("GET", "/profile", null, true);
+		check("[27a] GET /profile devuelve la identidad actual",
+			r.status() == 200 && r.body().contains("\"name\":\"Steve\"") && r.body().contains("uuid-1"), r.body());
+
+		r = call("POST", "/profile", "{\"name\":\"Tester1\"}", true);
+		check("[27b] POST /profile cambia el nombre -> 200",
+			r.status() == 200 && r.body().contains("\"name\":\"Tester1\""), r.body());
+
+		r = call("GET", "/profile", null, true);
+		check("[27c] el cambio persiste al releer",
+			r.status() == 200 && r.body().contains("\"name\":\"Tester1\""), r.body());
+
+		r = call("POST", "/profile", "{\"name\":\"Tester_2\"}", true);
+		check("[27d] acepta guion bajo y digitos", r.status() == 200, r.body());
+
+		r = call("POST", "/profile", "{\"name\":\"\"}", true);
+		check("[27e] nombre vacio -> 400 missing_name",
+			r.status() == 400 && r.body().contains("missing_name"), r.body());
+
+		r = call("POST", "/profile", "{}", true);
+		check("[27f] sin 'name' -> 400 missing_name",
+			r.status() == 400 && r.body().contains("missing_name"), r.body());
+
+		r = call("POST", "/profile", "{\"name\":\"Nombre Con Espacios\"}", true);
+		check("[27g] espacios en el nombre -> 400 invalid_player_name",
+			r.status() == 400 && r.body().contains("invalid_player_name"), r.body());
+
+		r = call("POST", "/profile", "{\"name\":\"MuyLargoNombreQueNoCabe\"}", true);
+		check("[27h] nombre de 24 chars -> 400 invalid_player_name",
+			r.status() == 400 && r.body().contains("invalid_player_name"), r.body());
+
+		r = call("POST", "/profile", "{\"name\":\"Alex\\n#op\"}", true);
+		check("[27i] salto de linea en el nombre -> 400 invalid_player_name",
+			r.status() == 400 && r.body().contains("invalid_player_name"), r.body());
+
+		r = call("DELETE", "/profile", null, true);
+		check("[27j] DELETE /profile -> 405", r.status() == 405, r.status() + " " + r.body());
 
 		// --- errores de transporte -----------------------------------------
 		r = call("DELETE", "/status", null, true);
@@ -483,8 +562,16 @@ public class PuenteSmokeTest {
 		check("[" + n + "] el puente se invoco siempre desde el hilo principal", onMainThreadCalls.get() > 0,
 			onMainThreadCalls.get() + " llamadas");
 		n++;
-		check("[" + n + "] llamadas al puente = 10 base + " + dispatched + " de Baritone",
-			onMainThreadCalls.get() == 10 + dispatched, String.valueOf(onMainThreadCalls.get()));
+		// 10 base + 7 de /profile + 3 de /connect sin puerto + las de Baritone.
+		// De /profile llegan 7: 2 GET + 2 POST validos + 3 POST con nombre de
+		// formato invalido. Los 3 si pasan por el puente a proposito, porque el
+		// patron de nombre se valida en `ClientBridge` (que es quien conoce
+		// `SharedConstants.MAX_PLAYER_NAME_LENGTH`), y por tanto en el hilo
+		// principal. Los 2 que no llegan son los que el controlador corta antes
+		// (nombre vacio o ausente), que no dependen de MC.
+		int profileCalls = 7 + 3;
+		check("[" + n + "] llamadas al puente = 10 base + " + profileCalls + " de perfil/connect + " + dispatched + " de Baritone",
+			onMainThreadCalls.get() == 10 + profileCalls + dispatched, String.valueOf(onMainThreadCalls.get()));
 		n++;
 
 		server.stop();

@@ -20,7 +20,7 @@ red de pruebas) que:
 1. construye un `MinecraftBridge` **falso** que solo registra en que hilo se
    le llamo,
 2. levanta un `PuenteHttpServer` real en `127.0.0.1:25599`,
-3. le manda 156 peticiones con `java.net.http.HttpClient`,
+3. le manda 169 peticiones con `java.net.http.HttpClient`,
 4. comprueba estado HTTP, codigo de error y contenido,
 5. comprueba que el buffer acotado se comporta,
 6. comprueba que los comandos de Baritone se traducen y salen por chat,
@@ -64,7 +64,7 @@ coincide con el del fichero (`PuenteSmokeTest`), que es lo que exige Java
 para una clase publica; el comando de arriba invoca ese nombre.
 
 Hubo antes una copia en `%TEMP%\opencode\SmokeTest.java` con el nombre corto
-`SmokeTest`. Esa variante daba 156/156 igual, pero rompia el comando documentado
+`SmokeTest`. Esa variante daba 169/169 igual, pero rompia el comando documentado
 en cuanto se copiaba al repositorio, porque `javac` no acepta una clase
 publica cuyo nombre no coincida con el del `.java`. Se renombro al integrarla.
 
@@ -103,14 +103,44 @@ publica cuyo nombre no coincida con el del `.java`. Se renombro al integrarla.
 - `{"command":"/say hola"}` devuelve `202` y se normaliza a `"say hola"`.
 - Cuerpo sin `command` devuelve `400`.
 
-### Conexion (7)
+### Conexion (10)
 - `{"address":"localhost:25565"}` devuelve `202`.
 - Puerto 70000 devuelve `400 invalid_port`.
 - `{"address":"[::1]:25566"}` devuelve `202` con `"[::1]:25566"` (formato sin ambiguedad).
-- `{"address":"juego.mc"}` devuelve `202` con el puerto por defecto 25580.
+- `{"address":"juego.mc"}` devuelve `202` con el puerto por defecto **25565**.
 - `{"host":..., "port":..., "name":...}` devuelve `202`.
 - Sin destino devuelve `400 missing_host`.
 - Puerto no numerico devuelve `400`.
+- Los tres caminos sin puerto explicito usan 25565, no 25580: `{"host":"servidor"}`,
+  `{"address":"otro.servidor"}` y `{"address":"[::1]"}`. Antes caian en 25580, que es
+  el puerto del HTTP; estas tres aserciones lo fijan para que no vuelva.
+- La asercion 23 tambien fijaba 25580, es decir, **codificaba el bug**. Al
+  corregirlo, la prueba fallo: senal de que la prueba vigilaba el valor
+  equivocado, no el correcto.
+
+### Identidad offline (10)
+- `GET /profile` devuelve nombre y UUID actuales.
+- `POST /profile {"name":"Tester1"}` cambia el nombre y `GET` lo confirma.
+- Acepta digitos y guion bajo (`Tester_2`).
+- Nombre vacio o ausente -> `400 missing_name`.
+- Con espacios, de 24 caracteres, o con salto de linea -> `400 invalid_player_name`.
+- `DELETE /profile` -> `405`.
+
+Las tres validaciones de formato **si** llegan al puente, porque el patron se
+comprueba en `ClientBridge` (que es quien conoce `SharedConstants.MAX_PLAYER_NAME_LENGTH`)
+y por tanto en el hilo principal. Las dos de `missing_name` no llegan: el
+controlador las corta antes, por no depender de MC.
+
+Lo que **no** cubren, y no se puede con este banco:
+- Que la escritura sobre el campo `private final` funcione de verdad. No se
+  puede instanciar `Minecraft` sin arrancar el juego; se verifico aparte
+  contra el jar real que hay un unico campo de tipo `net.minecraft.client.User`,
+  que `setAccessible` responde y que escribir un `final` no estatico con `Field.set`
+  funciona en Java 25.
+- Que el UUID que calculamos sea el que espera el servidor. Verificado aparte
+  contra `UUIDUtil.createOfflinePlayerUUID`, que coincide con
+  `nameUUIDFromBytes("OfflinePlayer:" + nombre)`.
+- Que al conectar de verdad el servidor acepte la identidad. Requiere juego.
 
 ### Desconexion (1)
 - `POST /disconnect` devuelve `202`.

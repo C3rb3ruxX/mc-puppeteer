@@ -215,6 +215,20 @@ class PuenteHttpServer(
 				send(exchange, 202, okBody(JsonObject().apply { addProperty("disconnected", true) }))
 			}
 
+			// --- Identidad de la sesion ---------------------------------------
+			"/profile" -> {
+				requireMethod(exchange, "GET", "POST")
+				if (exchange.requestMethod == "GET") {
+					send(exchange, 200, okBody(controller.playerIdentity().toJson()))
+				} else {
+					val name = readJson(exchange).optString("name")?.trim()
+					if (name.isNullOrEmpty()) {
+						throw HttpError(400, "missing_name", "falta 'name' con el nombre de jugador")
+					}
+					send(exchange, 200, okBody(controller.setPlayerName(name).toJson()))
+				}
+			}
+
 			"/baritone" -> send(exchange, 200, okBody(baritoneIndex()))
 
 			// --- Baritone: consultas por GET ---------------------------------

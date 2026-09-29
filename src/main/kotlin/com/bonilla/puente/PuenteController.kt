@@ -5,7 +5,6 @@ import com.bonilla.puente.http.Json
 import com.bonilla.puente.http.Json.optInt
 import com.bonilla.puente.http.Json.optString
 import com.google.gson.JsonObject
-
 /**
  * Logica de negocio expuesta por HTTP.
  *
@@ -73,7 +72,9 @@ class PuenteController(
 	fun connect(body: JsonObject): String {
 		// Forma preferida: "address": "host:puerto" (acepta tambien "host" sin puerto).
 		var host = body.optString("host")?.trim().orEmpty()
-		var port = body.optInt("port") ?: PuenteConfig.DEFAULT_PORT
+		// 25565 es el puerto de Minecraft. Antes se caia en
+		// `PuenteConfig.DEFAULT_PORT` (25580), que es el puerto del servidor HTTP.
+		var port = body.optInt("port") ?: DEFAULT_MINECRAFT_PORT
 		val address = body.optString("address")?.trim()
 		if (address != null && address.isNotEmpty()) {
 			val parsed = parseAddress(address)
@@ -92,6 +93,20 @@ class PuenteController(
 
 	fun disconnect() {
 		mainThread.callOnMainThread { bridge.disconnect() }
+	}
+
+	/** Identidad actual con la que se presentara el cliente al conectar. */
+	fun playerIdentity(): PlayerIdentity = mainThread.callOnMainThread { bridge.playerIdentity() }
+
+	/**
+	 * Cambia el nombre con el que se conectara el cliente, en caliente.
+	 *
+	 * No reinicia Minecraft ni desconecta. El UUID se recalcula con el
+	 * algoritmo offline del servidor, de modo que nombre y UUID nunca se
+	 * desincronizan.
+	 */
+	fun setPlayerName(name: String): PlayerIdentity = mainThread.callOnMainThread {
+		bridge.setPlayerName(name)
 	}
 
 	fun debugInfo(): JsonObject = Json.obj().apply {
@@ -164,15 +179,15 @@ class PuenteController(
 			if (end < 0) throw HttpError(400, "invalid_address", "direccion IPv6 sin cerrar: $address")
 			val host = trimmed.substring(1, end)
 			val rest = trimmed.substring(end + 1)
-			val port = if (rest.startsWith(":")) parsePort(rest.substring(1), address) else PuenteConfig.DEFAULT_PORT
+			val port = if (rest.startsWith(":")) parsePort(rest.substring(1), address) else DEFAULT_MINECRAFT_PORT
 			return host to port
 		}
 
 		val lastColon = trimmed.lastIndexOf(':')
-		if (lastColon < 0) return trimmed to PuenteConfig.DEFAULT_PORT
+		if (lastColon < 0) return trimmed to DEFAULT_MINECRAFT_PORT
 
 		// Sin puntos y con dos puntos es IPv6 sin puerto -> no tratarlo como host:puerto.
-		if (trimmed.count { it == ':' } > 1) return trimmed to PuenteConfig.DEFAULT_PORT
+		if (trimmed.count { it == ':' } > 1) return trimmed to DEFAULT_MINECRAFT_PORT
 
 		return trimmed.substring(0, lastColon) to parsePort(trimmed.substring(lastColon + 1), address)
 	}
@@ -200,5 +215,8 @@ class PuenteController(
 
 	private companion object {
 		const val MAX_MESSAGE_LENGTH = 256
+
+		/** Puerto por defecto de Minecraft, no el del servidor HTTP de Puente. */
+		const val DEFAULT_MINECRAFT_PORT = 25565
 	}
 }

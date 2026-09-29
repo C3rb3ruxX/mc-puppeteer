@@ -40,8 +40,49 @@ interface MinecraftBridge {
 	/** Jugadores actualmente en el tab list. */
 	fun onlinePlayers(): List<RemotePlayerInfo>
 
+	/**
+	 * Identidad con la que el cliente se presenta al conectar.
+	 *
+	 * Es distinta de `ClientStatus.playerName`: aquele es el jugador **ya
+	 * conectado** (`LocalPlayer`), este es el nombre y UUID con los que se
+	 * construira el proximo `ServerboundHelloPacket`.
+	 */
+	fun playerIdentity(): PlayerIdentity
+
+	/**
+	 * Cambia la identidad offline usada en la proxima conexion.
+	 *
+	 * El nombre se valida con las reglas de Minecraft (`[A-Za-z0-9_]{1,16}`) y
+	 * el UUID se deriva con el mismo algoritmo del servidor, de modo que la
+	 * pareja nombre/UUID es siempre coherente.
+	 *
+	 * No desconecta ni reinicia: solo sustituye el objeto de identidad. El
+	 * cambio **surte efecto en la siguiente conexion**; si ya estas dentro de un
+	 * mundo, sigues siendo el jugador anterior hasta que salgas y vuelvas a
+	 * conectar. Ver [PlayerIdentity.appliesOnNextConnect].
+	 */
+	fun setPlayerName(name: String): PlayerIdentity
+
 	/** Libera recursos del lado del cliente. */
 	fun dispose()
+}
+
+/**
+ * Identidad de la sesion: nombre y UUID con los que se conecta el cliente.
+ *
+ * @param appliesOnNextConnect `true` si se cambia mientras ya hay conexion, y
+ * por tanto el nombre nuevo aun no es el efectivo en el mundo actual.
+ */
+data class PlayerIdentity(
+	val name: String,
+	val uuid: String,
+	val appliesOnNextConnect: Boolean = false,
+) {
+	fun toJson(): JsonObject = JsonObject().apply {
+		addProperty("name", name)
+		addProperty("uuid", uuid)
+		addProperty("appliesOnNextConnect", appliesOnNextConnect)
+	}
 }
 
 data class ClientStatus(

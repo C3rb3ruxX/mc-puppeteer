@@ -80,6 +80,8 @@ esperas, un `null` en `screen` es normal, no un error.
 | `POST` | `/command` | Envia un comando. |
 | `POST` | `/connect` | Conecta a un servidor. |
 | `POST` | `/disconnect` | Sale al titulo. |
+| `GET` | `/profile` | Identidad con la que se conectara el cliente. |
+| `POST` | `/profile` | Cambia el nombre **en caliente** (solo offline). |
 | `GET` | `/debug` | Estado interno del buffer de chat. |
 | `GET` | `/baritone` | Indice de comandos de Baritone. |
 | `GET` | `/baritone/version`, `/proc`, `/eta`, `/modified`, `/paused`, `/wp`, `/gc` | Consultas de Baritone. |
@@ -272,6 +274,52 @@ curl.exe -s -X POST "$BASE/disconnect" -H $AUTH
 ```json
 { "ok": true, "data": { "disconnected": true } }
 ```
+
+### `GET /profile` y `POST /profile`
+
+Cambia el nombre con el que el cliente se conecta, **en caliente y sin
+reiniciar Minecraft**.
+
+```powershell
+# Leer la identidad actual
+curl.exe -s "$BASE/profile" -H $AUTH
+
+# Cambiarla
+curl.exe -s -X POST "$BASE/profile" -H $AUTH -H "Content-Type: application/json" `
+  -d '{\"name\": \"Tester1\"}'
+```
+
+```json
+{ "ok": true, "data": { "name": "Tester1", "uuid": "5b30590c-7361-31a2-a5a0-ee3cb0717365", "appliesOnNextConnect": false } }
+```
+
+**Solo vale para servidores en modo offline.** En modo online el servidor
+autentica por UUID y token, no por nombre: un nombre inventado daria error de
+autenticacion. Esta pensado para pruebas y servidores propios.
+
+El UUID se recalcula con el mismo algoritmo que usa el servidor
+(`UUID.nameUUIDFromBytes("OfflinePlayer:" + nombre)`, un UUID v3), de forma que
+la pareja nombre/UUID nunca queda desincronizada y coincide con la que espera
+el servidor.
+
+**Cuando surte efecto.** No reinicia nada, pero el nombre solo se manda en el
+paquete de login. Si ya estas dentro de un mundo, sigues siendo el jugador
+anterior: el nombre nuevo entra en juego la proxima vez que conectes. Por eso
+la respuesta incluye `appliesOnNextConnect`, que es `true` en ese caso. Para
+aplicarlo de inmediato:
+
+```powershell
+curl.exe -s -X POST "$BASE/disconnect" -H $AUTH
+curl.exe -s -X POST "$BASE/profile"  -H $AUTH -H "Content-Type: application/json" -d '{\"name\": \"Tester1\"}'
+curl.exe -s -X POST "$BASE/connect"   -H $AUTH -H "Content-Type: application/json" -d '{\"host\": \"localhost\"}'
+```
+
+El nombre se valida con las reglas de Minecraft: `^[A-Za-z0-9_]{1,16}$`.
+Un nombre invalido devuelve `400 invalid_player_name` y **no** cambia nada.
+
+Ojo con la distincion: `GET /status` devuelve `playerName`, que es el jugador
+**ya conectado**. `/profile` devuelve la identidad con la que se presentara el
+cliente, que puede ser distinta.
 
 ### `GET /debug`
 
@@ -567,33 +615,27 @@ while True:
 
 ---
 
-## 10. Bug conocido: el puerto por defecto de `/connect`
+## 10. Corregido: el puerto por defecto de `/connect`
 
-`POST /connect` sin puerto explicito intenta conectarse a **25580**, cuando
-Minecraft usa **25565**.
+Antes, `POST /connect` sin puerto explicito intentaba conectarse a **25580**
+(puerto del servidor HTTP de Puente) en vez de **25565** (el de Minecraft).
 
-La causa es que `PuenteController` reutiliza `PuenteConfig.DEFAULT_PORT` (que es
-el puerto del servidor HTTP, 25580) como si fuera el puerto por defecto del
-juego:
+La causa era que `PuenteController` reutilizaba `PuenteConfig.DEFAULT_PORT` como
+si fuera el puerto por defecto del juego. Ahora el controlador tiene su propia
+constante:
 
 ```kotlin
 // PuenteConfig.kt
 const val DEFAULT_PORT = 25580          // puerto del servidor HTTP
 
 // PuenteController.kt
-var port = body.optInt("port") ?: PuenteConfig.DEFAULT_PORT   // <- para el juego
-if (lastColon < 0) return trimmed to PuenteConfig.DEFAULT_PORT
-if (trimmed.count { it == ':' } > 1) return trimmed to PuenteConfig.DEFAULT_PORT
+const val DEFAULT_MINECRAFT_PORT = 25565 // puerto del juego
+var port = body.optInt("port") ?: DEFAULT_MINECRAFT_PORT
 ```
 
-Afecta a los tres caminos sin puerto: `{"host": "servidor"}`,
-`{"address": "servidor"}` y una IPv6 sin `:puerto`. Con `{"host": "x", "port": 25565}`
-o `{"address": "x:25565"}` funciona bien, porque el puerto llega explicito.
+Afectaba a los tres caminos sin puerto: `{"host": "servidor"}`,
+`{"address": "servidor"}` y una IPv6 sin `:puerto`. Ahora los tres usan 25565.
 
-La prueba de humo fija ese valor como correcto (asercion 23), asi que hoy el
-comportamiento esta "verde" siendo incorrecto. Un cambio de una linea: un
-`DEFAULT_GAME_PORT = 25565` propio del controlador, en vez de reutilizar el del
-HTTP.
-
-**Workaround mientras tanto: manda siempre `host` y `port` separados, o
-`address` con `:puerto`.**
+La prueba de humo lo fija con la asercion
+`POST /connect con {"host":"servidor"} -> 25565`, de modo que un regreso al
+comportamiento anterior la haria fallar.
