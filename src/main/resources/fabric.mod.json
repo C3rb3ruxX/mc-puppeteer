@@ -3,17 +3,13 @@
 	"id": "mc-puppeteer",
 	"version": "${version}",
 	"name": "mc-puppeteer",
-	"description": "This is an example description! Tell everyone what your mod is about!",
+	"description": "Abre un servidor HTTP local en un hilo aparte que permite observar y controlar el cliente de Minecraft por HTTP: enviar chat y comandos, leer el chat recibido, consultar el estado y conectar o desconectar de servidores. El nucleo HTTP no depende de Minecraft y nunca toca el juego desde un hilo ajeno al principal.",
 	"authors": [
-		"Me!"
+		"bonilla"
 	],
-	"contact": {
-		"homepage": "https://fabricmc.net/",
-		"sources": "https://github.com/FabricMC/fabric-example-mod"
-	},
 	"license": "CC0-1.0",
 	"icon": "assets/mc-puppeteer/icon.png",
-	"environment": "*",
+	"environment": "client",
 	"entrypoints": {
 		"main": [
 			{
@@ -34,13 +30,6 @@
 			}
 		]
 	},
-	"mixins": [
-		"mc-puppeteer.mixins.json",
-		{
-			"config": "mc-puppeteer.client.mixins.json",
-			"environment": "client"
-		}
-	],
 	"depends": {
 		"fabricloader": ">=0.19.5",
 		"minecraft": "~26.3",
