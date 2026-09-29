@@ -32,6 +32,16 @@ bin/
 
 run/
 
+# scripts (run-instances.ts y compañía)
+
+scripts/.cache/
+scripts/.run-config.json
+
+# instancias y logs generados
+
+run-instances/
+logs/
+
 # java
 
 hs_err_*.log

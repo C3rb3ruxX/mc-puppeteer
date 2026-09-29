@@ -395,6 +395,21 @@ Baritone son **mensajes de chat**, no comandos de servidor.
 Los endpoints `/baritone/*` usan internamente el camino de chat, asi que no
 tienen ese problema.
 
+### Donde aparece la respuesta de Baritone
+
+En el **log del cliente**, no en `/chat/history`. La captura del mod engancha
+`ClientReceiveMessageEvents`, que solo ve lo que llega por red; Baritone genera
+sus mensajes en local. En una instancia lanzada por
+[`07-instancias-simultaneas.md`](07-instancias-simultaneas.md):
+
+```bash
+grep baritone run-instances/mc1/logs/latest.log | tail
+```
+
+El `note` del indice (`GET /puppeteer/baritone`) dice "la respuesta llega al
+chat: leela en /chat"; con Baritone instalado eso no es correcto y queda
+pendiente de arreglar en el codigo.
+
 ### Requisitos
 
 - Baritone instalado y activo.

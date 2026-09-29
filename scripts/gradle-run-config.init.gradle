@@ -1,0 +1,126 @@
+// Init script de Gradle: vuelca en JSON como Loom configura el cliente, para
+// que `run-instances.ts` pueda lanzar N clientes sin depender de Gradle.
+//
+// Uso:  ./gradlew -I scripts/gradle-run-config.init.gradle dumpRunConfig
+//
+// Gradle sigue siendo quien sabe el classpath (Minecraft remapeado a mojmap,
+// Fabric API y FLK remapeadas, clases del mod...). Este script solo lo copia a
+// un fichero legible. Sin dependencias: solo el Groovy que ya trae Gradle.
+//
+// Detalles:
+//  - Desde un init script no se puede tocar `project.extensions` (corre antes de
+//    que existan los plugins), asi que la run se busca en la propia extension de
+//    Loom. Groovy es dinamico, asi que `cfg.sourceSet.get()` y similares
+//    funcionan sin importar las clases de Loom.
+//  - El volcado se hace en el `doLast` de una tarea: resolver un classpath
+//    durante la configuracion esta prohibido en Gradle 9.
+
+import groovy.json.JsonOutput
+
+if (!gradle.startParameter.taskNames.any { it.toLowerCase().contains('dumprunconfig') }) {
+    return
+}
+
+gradle.projectsEvaluated { g ->
+    def project = g.rootProject
+    def loom = project.extensions.findByName('loom')
+    if (loom == null) {
+        throw new GradleException('El plugin de Loom no esta aplicado: no hay nada que volcar.')
+    }
+
+    def runs = null
+    for (String container : ['runs', 'runConfigs', 'configurations']) {
+        try {
+            def c = loom."$container"
+            if (c != null && c.metaClass.respondsTo(c, 'findByName', String)) {
+                runs = c
+                break
+            }
+        } catch (Throwable ignored) {
+        }
+    }
+    if (runs == null) {
+        throw new GradleException('No encuentro la extension de runs de Loom.')
+    }
+
+    // `client` es el nombre de la run que produce la tarea `runClient`.
+    def cfg = runs.findByName('client')
+    if (cfg == null) {
+        throw new GradleException("No se encontro la run 'client'. Disponibles: ${runs*.name}")
+    }
+
+    project.tasks.register('dumpRunConfig') {
+        group = 'fabric'
+        description = 'Vuelca en scripts/.run-config.json como Loom arranca el cliente.'
+        notCompatibleWithConfigurationCache('lee el classpath del source set durante la ejecucion')
+        // launch.cfg, log4j.xml y remapClasspath.txt son lo que el arranque
+        // necesita en disco: `configureLaunch` es la tarea que los genera.
+        try {
+            dependsOn(project.tasks.named('configureLaunch'))
+        } catch (Throwable ignored) {
+        }
+        doLast {
+            // Loom solo termina de calcular los argumentos (los -Dfabric.dli.*,
+            // entre otros) cuando arranca la tarea runClient. Aqui hacemos lo
+            // mismo para leerlos; es idempotente gracias al flag `isFinalised`.
+            try {
+                def fr = loom.getClass().getClassLoader()
+                        .loadClass('net.fabricmc.loom.configuration.ide.DefaultRunConfigurationSettings')
+                fr.finialise(cfg, project)
+            } catch (Throwable t) {
+                project.logger.lifecycle("dumpRunConfig: no he podido finalizar la run (${t.getClass().simpleName}: ${t.getMessage()}); los argumentos pueden venir incompletos.")
+            }
+
+            def sourceSet = cfg.sourceSet.get()
+            def mainClass = cfg.devLaunchMainClass.get()
+            def jvmArgs = cfg.jvmArguments.get()
+            def programArgs = cfg.programArguments.get()
+            def env = cfg.environmentVars.get()
+            def runDir = cfg.runDirectory.get().asFile
+
+            // El classpath que arranca el juego es el del source set, menos las
+            // librerias que el launcher de desarrollo ya pone en su module path.
+            def excludes = []
+            try {
+                def rr = loom.getClass().getClassLoader()
+                        .loadClass('net.fabricmc.loom.configuration.ide.RuntimeLibraries')
+                excludes = (rr.getExcludedLibraryPaths(project, cfg) as List).collect { it.toString() }
+            } catch (Throwable t) {
+                project.logger.lifecycle("dumpRunConfig: sin lista de librerias excluidas (${t.getClass().simpleName}: ${t.getMessage()}); uso el classpath del source set tal cual.")
+            }
+            def cp = project.sourceSets.getByName(sourceSet).runtimeClasspath.files
+                    .collect { it.absolutePath }
+                    .findAll { !excludes.contains(it) }
+                    .sort()
+
+            def data = [
+                    run       : cfg.getName(),
+                    display   : cfg.displayName.get(),
+                    sourceSet : sourceSet,
+                    mainClass : mainClass,
+                    classpath : cp,
+                    jvmArgs   : jvmArgs,
+                    programArgs: programArgs,
+                    env       : env,
+                    runDir    : runDir.absolutePath,
+                    excluded  : excludes,
+            ]
+
+            def out = new File(project.rootDir, 'scripts/.run-config.json')
+            out.parentFile.mkdirs()
+            out.text = JsonOutput.prettyPrint(JsonOutput.toJson(data)) + '\n'
+
+            println ''
+            println '== dumpRunConfig =='
+            println "  run         : ${data.run} (${data.display})"
+            println "  mainClass   : $mainClass"
+            println "  runDir      : $runDir"
+            println "  classpath   : ${cp.size()} entradas (excluidas ${excludes.size()})"
+            println "  jvmArgs     : ${jvmArgs.join(' ')}"
+            println "  programArgs : ${programArgs.join(' ')}"
+            println "  env         : ${env}"
+            println "  escrito en  : $out"
+            println ''
+        }
+    }
+}

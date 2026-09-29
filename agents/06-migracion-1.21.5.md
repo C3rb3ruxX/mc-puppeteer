@@ -229,16 +229,18 @@ funciona en Java 21, que es el runtime de 1.21.5.
 
 ## 6. Lo que sigue sin verificar
 
+**Ya verificado** despues de la migracion, con 3 instancias reales y un servidor
+local (detalle en `07-instancias-simultaneas.md`):
+
+- `POST /connect` y `POST /disconnect`, que son tres llamadas encadenadas: el
+  cliente entro al mundo (`inWorld:true`, UUID offline propio), y
+  `POST /respawn` resucito tras morir.
+- Que el servidor acepta la identidad offline.
+- Que Baritone este escuchando de verdad: se cargo, respondio a `#version` y
+  escribio su cache en el directorio de la instancia. Matiz: su respuesta llega
+  al log del juego, no a `/chat/history`.
+
 Lo mismo que antes de la migracion, porque no depende de la version:
 
-- Que el servidor acepte de verdad la identidad offline y el paquete de
-  reaparicion: hace falta un cliente conectado a un servidor real.
-- Que Baritone este escuchando: la prueba comprueba que se llama a `sendChat`, no
-  que el mod lo intercepte.
 - El comportamiento en transiciones de mundo (ver `03-testing.md`, "El hueco que
   mas me preocupa").
-
-Y una cosa que si es nueva: **`POST /disconnect` y `POST /connect` nunca se
-ejecutaron contra el juego**. Antes eran una llamada a metodo; ahora son tres
-llamadas que tienen que encadenar bien. Merece una prueba manual en cuanto haya
-cliente y servidor.
