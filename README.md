@@ -27,6 +27,10 @@ Base `http://127.0.0.1:25580/puppeteer`, autenticacion
 
 Configuracion en `config/mc-puppeteer.json`, creada sola la primera vez.
 
+**Para integrar de verdad, mira [`05-api.md`](agents/05-api.md)**: tiene las
+peticiones listas para copiar y pegar, los cuerpos exactos, la tabla completa de
+errores y los ejemplos en PowerShell, Node y Python.
+
 ## Documentacion
 
 La documentacion vive en [`agents/`](agents/), en este orden:
@@ -37,6 +41,7 @@ La documentacion vive en [`agents/`](agents/), en este orden:
 | [`01-addendum-hallazgos.md`](agents/01-addendum-hallazgos.md) | Lo que se descubrio **al compilar**: `Minecraft` ya no tiene `screen`, `disconnect` cambio de firma, MC 26.3 trae anotaciones de nulabilidad, y demas. |
 | [`02-implementacion.md`](agents/02-implementacion.md) | Documento de construccion: arquitectura, ficheros, garantias de rendimiento, seguridad, API completa, tabla de errores, y donde se desvia del plan. |
 | [`03-testing.md`](agents/03-testing.md) | Como ejecutar la prueba de humo, que cubre, y que queda sin cubrir. |
+| [`05-api.md`](agents/05-api.md) | Referencia de la API con ejemplos listos para copiar y pegar, codigos de error y un bug conocido. |
 | [`tests/PuenteSmokeTest.java`](agents/tests/PuenteSmokeTest.java) | 48 aserciones sobre el nucleo HTTP, ejecutables sin Minecraft. |
 
 ## Compilar

@@ -20,11 +20,12 @@ red de pruebas) que:
 1. construye un `MinecraftBridge` **falso** que solo registra en que hilo se
    le llamo,
 2. levanta un `PuenteHttpServer` real en `127.0.0.1:25599`,
-3. le manda 48 peticiones con `java.net.http.HttpClient`,
+3. le manda 89 peticiones con `java.net.http.HttpClient`,
 4. comprueba estado HTTP, codigo de error y contenido,
 5. comprueba que el buffer acotado se comporta,
-6. comprueba que el limitador de tasa corta,
-7. apaga el servidor.
+6. comprueba que los comandos de Baritone se traducen y salen por chat,
+7. comprueba que el limitador de tasa corta,
+8. apaga el servidor.
 
 ### Compilar y ejecutar (Windows / PowerShell)
 
@@ -63,7 +64,7 @@ coincide con el del fichero (`PuenteSmokeTest`), que es lo que exige Java
 para una clase publica; el comando de arriba invoca ese nombre.
 
 Hubo antes una copia en `%TEMP%\opencode\SmokeTest.java` con el nombre corto
-`SmokeTest`. Esa variante daba 48/48 igual, pero rompia el comando documentado
+`SmokeTest`. Esa variante daba 89/89 igual, pero rompia el comando documentado
 en cuanto se copiaba al repositorio, porque `javac` no acepta una clase
 publica cuyo nombre no coincida con el del `.java`. Se renombro al integrarla.
 
@@ -133,6 +134,27 @@ publica cuyo nombre no coincida con el del `.java`. Se renombro al integrarla.
 - `drain(N)` consume exactamente N.
 - `drain` de mas de lo disponible devuelve lo que hay.
 - `drain` sobre buffer vacio devuelve lista vacia.
+
+### Baritone (46)
+Baritone se controla por chat con prefijo `#`, no por API HTTP. Lo que se
+comprueba es que el bridge lo envie por `sendChat` y **nunca** por
+`sendCommand` (que va al servidor y lo rechaza).
+
+- El indice `GET /baritone` responde `200`.
+- Consultas: `version`, `proc`, `eta`, `modified`, `wp`, `gc` translates a su
+  comando `#` correspondiente.
+- Consultas con parametro: `help?q=mine` -> `#help mine`,
+  `find?block=diamond_ore` -> `#find diamond_ore`.
+- Traduccion de 19 acciones POST (goto en sus 4 formas, goal, mine, build,
+  follow, tunnel, cleararea, explore, axis, stop, surface, cancel, repack...).
+- `POST /baritone/stop?force` -> `#forcecancel`.
+- Rechazos: coordenadas parciales (`{"x":1,"y":2}`) -> `400 invalid_goal`,
+  `axis` fuera de rango -> `400`, ruta no registrada -> `404`,
+  `POST` sobre una ruta que solo admite `GET` -> `405`.
+- Inyeccion bloqueada en 4 casos (`"diamond; op Alex"`, `"Alex\n#op"`,
+  `"../../etc/passwd"`, `"base.schematic && rm -rf /"`).
+- Los N comandos salieron por `sendChat`, ninguno por `sendCommand`.
+- Todos los mensajes llevan prefijo `#`.
 
 ### Limite de tasa (1)
 - Tras superar 120 peticiones en la ventana, aparecen `429`.

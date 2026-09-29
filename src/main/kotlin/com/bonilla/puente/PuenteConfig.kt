@@ -18,7 +18,7 @@ data class PuenteConfig(
 	var enabled: Boolean = true,
 	var host: String = DEFAULT_HOST,
 	var port: Int = DEFAULT_PORT,
-	var requireToken: Boolean = true,
+	var requireToken: Boolean = false,
 	var authToken: String = "",
 	var chatBufferSize: Int = 256,
 	var maxBodyBytes: Int = 16 * 1024,

@@ -13,6 +13,10 @@ import java.util.concurrent.atomic.AtomicInteger;
 /** Prueba de humo del nucleo HTTP con un puente falso, fuera de Minecraft. */
 public class PuenteSmokeTest {
 	static final AtomicInteger onMainThreadCalls = new AtomicInteger();
+	/** Chat y comando se cuentan por separado: Baritone solo reacciona al chat. */
+	static final AtomicInteger chatCalls = new AtomicInteger();
+	static final AtomicInteger commandCalls = new AtomicInteger();
+	static final List<String> sentChat = new ArrayList<>();
 	static final HttpClient http = HttpClient.newHttpClient();
 	static String base;
 	static String token = "token-secreto";
@@ -51,10 +55,13 @@ public class PuenteSmokeTest {
 			}
 			@Override public void sendChat(String m) {
 				onMainThreadCalls.incrementAndGet();
+				chatCalls.incrementAndGet();
+				sentChat.add(m);
 				checkOnMain("sendChat '" + m + "'");
 			}
 			@Override public void sendCommand(String c) {
 				onMainThreadCalls.incrementAndGet();
+				commandCalls.incrementAndGet();
 				checkOnMain("sendCommand '" + c + "'");
 			}
 			@Override public void connect(String h, int p, String n) {
@@ -221,21 +228,134 @@ public class PuenteSmokeTest {
 		check("[43] drain de mas de lo disponible devuelve lo que hay", buffer.drain(99, false).size() == 2, String.valueOf(buffer.size()));
 		check("[44] drain en buffer vacio -> 0", buffer.drain(10, false).isEmpty(), "vacio");
 
+		// --- Baritone -------------------------------------------------------
+		// Baritone no tiene API HTTP: se controla con chat prefijado con '#'.
+		// Lo que se comprueba aqui es que el bridge lo envie por sendChat y
+		// NUNCA por sendCommand (que va al servidor y lo rechaza).
+		int chatBefore = chatCalls.get();
+		int commandBefore = commandCalls.get();
+		int dispatched = 0;
+
+		r = call("GET", "/baritone", null, true);
+		check("[45] indice de Baritone -> 200", r.status() == 200 && r.body().contains("baritone"), r.body());
+
+		// Consultas por GET
+		String[][] gets = {
+			{"/baritone/version", "#version"},
+			{"/baritone/proc", "#proc"},
+			{"/baritone/eta", "#eta"},
+			{"/baritone/modified", "#modified"},
+			{"/baritone/wp", "#wp"},
+			{"/baritone/gc", "#gc"},
+			{"/baritone/help?q=mine", "#help mine"},
+			{"/baritone/find?block=diamond_ore", "#find diamond_ore"},
+		};
+		int n = 46;
+		for (String[] g : gets) {
+			r = call("GET", g[0], null, true);
+			boolean ok = r.status() == 202 && r.body().contains(g[1]);
+			check("[" + n + "] GET " + g[0] + " -> " + g[1], ok, r.status() + " " + r.body());
+			if (ok) dispatched++;
+			n++;
+		}
+
+		// Traduccion de acciones: cuerpo -> comando '#'
+		String[][] posts = {
+			{"/baritone/goto", "{\"x\":1000,\"y\":64,\"z\":500}", "#goto 1000 64 500"},
+			{"/baritone/goto", "{\"x\":1000,\"z\":500}", "#goto 1000 500"},
+			{"/baritone/goto", "{\"y\":64}", "#goto 64"},
+			{"/baritone/goto", "{\"block\":\"diamond_ore\"}", "#goto diamond_ore"},
+			{"/baritone/goal", "{\"x\":1,\"y\":2,\"z\":3}", "#goal 1 2 3"},
+			{"/baritone/mine", "{\"block\":\"diamond_ore\",\"amount\":16}", "#mine diamond_ore 16"},
+			{"/baritone/mine", "{\"block\":\"diamond_ore\"}", "#mine diamond_ore"},
+			{"/baritone/build", "{\"file\":\"base.schematic\",\"x\":1,\"y\":2,\"z\":3}", "#build base.schematic 1 2 3"},
+			{"/baritone/build", "{\"file\":\"base.schematic\"}", "#build base.schematic"},
+			{"/baritone/follow", "{\"target\":\"Alex\"}", "#follow Alex"},
+			{"/baritone/tunnel", "{\"height\":1,\"width\":2,\"length\":3}", "#tunnel 1 2 3"},
+			{"/baritone/cleararea", "{\"radius\":5}", "#cleararea 5"},
+			{"/baritone/explore", "{\"x\":100,\"z\":200}", "#explore 100 200"},
+			{"/baritone/explore", "{}", "#explore"},
+			{"/baritone/axis", "{\"y\":12}", "#axis 12"},
+			{"/baritone/stop", "{}", "#stop"},
+			{"/baritone/surface", "{}", "#surface"},
+			{"/baritone/cancel", "{}", "#cancel"},
+			{"/baritone/repack", "{}", "#repack"},
+		};
+		for (String[] p : posts) {
+			r = call("POST", p[0], p[1], true);
+			boolean ok = r.status() == 202 && r.body().contains(p[2]);
+			check("[" + n + "] POST " + p[0] + " " + p[1] + " -> " + p[2], ok, r.status() + " " + r.body());
+			if (ok) dispatched++;
+			n++;
+		}
+
+		r = call("POST", "/baritone/stop?force", "{}", true);
+		check("[" + n + "] POST /baritone/stop?force -> #forcecancel", r.status() == 202 && r.body().contains("#forcecancel"), r.body());
+		if (r.status() == 202) dispatched++;
+		n++;
+
+		// Rechazos: coordenadas incoherentes e inyeccion de texto
+		String[][] rejects = {
+			{"/baritone/goto", "{}", "400", "invalid_goal"},
+			{"/baritone/goto", "{\"x\":1,\"y\":2}", "400", "invalid_goal"},
+			{"/baritone/axis", "{\"y\":999}", "400", "invalid_field"},
+			{"/baritone/explore", "{\"x\":100}", "400", "invalid_field"},
+			{"/baritone/cleararea", "{\"radius\":0}", "400", "invalid_field"},
+			// Ruta no registrada: el router la rechaza antes de llegar al traductor.
+			{"/baritone/inventario", "{}", "404", "not_found"},
+			// /baritone/find solo admite GET; por POST debe dar 405, no enviar nada.
+			{"/baritone/find", "{\"block\":\"stone\"}", "405", "method_not_allowed"},
+		};
+		for (String[] p : rejects) {
+			r = call("POST", p[0], p[1], true);
+			boolean ok = r.status() == Integer.parseInt(p[2]) && r.body().contains(p[3]);
+			check("[" + n + "] rechaza " + p[0] + " -> " + p[2] + " " + p[3], ok, r.status() + " " + r.body());
+			n++;
+		}
+
+		// Inyeccion: nada fuera del charset debe llegar al comando
+		String[][] injections = {
+			{"/baritone/mine", "{\"block\":\"diamond; op Alex\"}", "invalid_field"},
+			{"/baritone/follow", "{\"target\":\"Alex\\n#op\"}", "invalid_field"},
+			{"/baritone/build", "{\"file\":\"../../etc/passwd\"}", "invalid_field"},
+			{"/baritone/build", "{\"file\":\"base.schematic && rm -rf /\"}", "invalid_field"},
+		};
+		for (String[] p : injections) {
+			r = call("POST", p[0], p[1], true);
+			boolean ok = r.status() == 400 && r.body().contains(p[2]);
+			check("[" + n + "] inyeccion bloqueada en " + p[0] + ": " + p[1], ok, r.status() + " " + r.body());
+			n++;
+		}
+
+		// Todos los comandos salen por chat, ninguno por comando de servidor
+		check("[" + n + "] los " + dispatched + " comandos Baritone salieron por sendChat",
+			chatCalls.get() - chatBefore == dispatched, "chat +" + (chatCalls.get() - chatBefore));
+		n++;
+		check("[" + n + "] ningun comando de Baritone uso sendCommand",
+			commandCalls.get() == commandBefore, "command +" + (commandCalls.get() - commandBefore));
+		n++;
+		check("[" + n + "] todos los mensajes Baritone llevan prefijo '#'",
+			sentChat.stream().filter(s -> s.startsWith("#")).count() >= dispatched, sentChat.toString());
+		n++;
+
 		// --- limite de tasa --------------------------------------------------
 		Thread.sleep(200);
 		int limited = 0;
 		for (int i = 0; i < 200; i++) {
 			if (call("GET", "/debug", null, true).status() == 429) limited++;
 		}
-		check("[45] limitador de tasa activa 429 tras 120 peticiones", limited > 0, "429 en " + limited + " peticiones");
+		check("[" + n + "] limitador de tasa activa 429 tras 120 peticiones", limited > 0, "429 en " + limited + " peticiones");
+		n++;
 
-		check("[46] el puente se invoco siempre desde el hilo principal", onMainThreadCalls.get() > 0,
+		check("[" + n + "] el puente se invoco siempre desde el hilo principal", onMainThreadCalls.get() > 0,
 			onMainThreadCalls.get() + " llamadas");
-		check("[47] numero de llamadas al puente = " + onMainThreadCalls.get(),
-			onMainThreadCalls.get() == 10, String.valueOf(onMainThreadCalls.get()));
+		n++;
+		check("[" + n + "] llamadas al puente = 10 base + " + dispatched + " de Baritone",
+			onMainThreadCalls.get() == 10 + dispatched, String.valueOf(onMainThreadCalls.get()));
+		n++;
 
 		server.stop();
-		check("[48] servidor se detiene sin error", true, "");
+		check("[" + n + "] servidor se detiene sin error", true, "");
 
 		System.out.println();
 		System.out.println(failures == 0

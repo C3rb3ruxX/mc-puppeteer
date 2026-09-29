@@ -3,6 +3,7 @@ package com.bonilla.puente
 import com.bonilla.puente.http.HttpError
 import com.bonilla.puente.http.Json
 import com.bonilla.puente.http.Json.optInt
+import com.bonilla.puente.http.Json.optString
 import com.bonilla.puente.http.Json.requireString
 import com.google.gson.JsonArray
 import com.google.gson.JsonObject
@@ -214,9 +215,133 @@ class PuenteHttpServer(
 				send(exchange, 202, okBody(JsonObject().apply { addProperty("disconnected", true) }))
 			}
 
+			"/baritone" -> send(exchange, 200, okBody(baritoneIndex()))
+
+			// --- Baritone: consultas por GET ---------------------------------
+			// GET con efecto secundario a proposito: Baritone es una interfaz de
+			// comandos de una sola llamada y no tiene equivalente idempotente.
+			// Es aceptable en loopback; documentado en agents/05-api.md.
+			"/baritone/version" -> getBaritone(exchange) { controller.baritoneReadOnly("version", null) }
+			"/baritone/proc" -> getBaritone(exchange) { controller.baritoneReadOnly("proc", null) }
+			"/baritone/eta" -> getBaritone(exchange) { controller.baritoneReadOnly("eta", null) }
+			"/baritone/modified" -> getBaritone(exchange) { controller.baritoneReadOnly("modified", null) }
+			"/baritone/wp" -> getBaritone(exchange) { controller.baritoneReadOnly("wp", null) }
+			"/baritone/help" -> getBaritone(exchange) { controller.baritoneReadOnly("help", queryString(exchange, "q")) }
+			"/baritone/find" -> getBaritone(exchange) { controller.baritoneFind(queryString(exchange, "block").orEmpty()) }
+			"/baritone/gc" -> getBaritone(exchange) { controller.baritoneReadOnly("gc", null) }
+
+			// --- Baritone: mantenimiento por POST ----------------------------
+			"/baritone/repack" -> postBaritone(exchange) { controller.baritoneMaintenance("repack") }
+			"/baritone/reloadall" -> postBaritone(exchange) { controller.baritoneMaintenance("reloadall") }
+			"/baritone/saveall" -> postBaritone(exchange) { controller.baritoneMaintenance("saveall") }
+			"/baritone/render" -> postBaritone(exchange) { controller.baritoneMaintenance("render") }
+
+			// --- Baritone: acciones por POST ---------------------------------
+			"/baritone/goto" -> postBaritone(exchange) {
+				val b = readJson(exchange)
+				val (x, y, z) = coords(b)
+				val block = b.optString("block")
+				if (block != null) controller.baritoneGotoBlock(block)
+				else controller.baritoneGoto(x, y, z)
+			}
+
+			"/baritone/goal" -> postBaritone(exchange) {
+				val b = readJson(exchange)
+				val (x, y, z) = coords(b)
+				controller.baritoneGoal(x, y, z)
+			}
+
+			"/baritone/mine" -> postBaritone(exchange) {
+				val b = readJson(exchange)
+				controller.baritoneMine(
+					b.requireString("block"),
+					b.optInt("amount"),
+				)
+			}
+
+			"/baritone/build" -> postBaritone(exchange) {
+				val b = readJson(exchange)
+				controller.baritoneBuild(b.requireString("file"), origin(b))
+			}
+
+			"/baritone/follow" -> postBaritone(exchange) {
+				controller.baritoneFollow(readJson(exchange).requireString("target"))
+			}
+
+			"/baritone/stop" -> postBaritone(exchange) {
+				controller.baritoneStop(exchange.requestURI.query?.contains("force") == true)
+			}
+
+			"/baritone/axis" -> postBaritone(exchange) {
+				controller.baritoneAxis(readJson(exchange).optInt("y"))
+			}
+
+			"/baritone/tunnel" -> postBaritone(exchange) {
+				val b = readJson(exchange)
+				controller.baritoneTunnel(
+					b.optInt("height") ?: 1,
+					b.optInt("width") ?: 1,
+					b.optInt("length") ?: 1,
+				)
+			}
+
+			"/baritone/cleararea" -> postBaritone(exchange) {
+				controller.baritoneCleararea(readJson(exchange).optInt("radius") ?: 1)
+			}
+
+			"/baritone/explore" -> postBaritone(exchange) {
+				val b = readJson(exchange)
+				controller.baritoneExplore(b.optInt("x"), b.optInt("z"))
+			}
+
+			"/baritone/surface", "/baritone/top", "/baritone/invert",
+			"/baritone/come", "/baritone/blacklist", "/baritone/elytra",
+			"/baritone/farm", "/baritone/cancel", "/baritone/path", "/baritone/thisway" ->
+				postBaritone(exchange) { controller.baritoneNoArg(route.substringAfterLast("/")) }
+
 			else -> send(exchange, 404, errorBody("not_found", "Endpoint desconocido: $BASE_PATH$route"))
 		}
 	}
+
+	private fun getBaritone(exchange: HttpExchange, action: () -> String) {
+		requireMethod(exchange, "GET")
+		send(exchange, 202, okBody(JsonObject().apply { addProperty("sent", action()) }))
+	}
+
+	private fun postBaritone(exchange: HttpExchange, action: () -> String) {
+		requireMethod(exchange, "POST")
+		send(exchange, 202, okBody(JsonObject().apply { addProperty("sent", action()) }))
+	}
+
+	/** Lee x/y/z del cuerpo. Devuelve nulls en los ausentes; el traductor valida. */
+	private fun coords(body: JsonObject): Triple<Int?, Int?, Int?> =
+		Triple(body.optInt("x"), body.optInt("y"), body.optInt("z"))
+
+	private fun origin(body: JsonObject): Triple<Int, Int, Int>? {
+		val x = body.optInt("x") ?: return null
+		val y = body.optInt("y") ?: return null
+		val z = body.optInt("z") ?: return null
+		return Triple(x, y, z)
+	}
+
+	private fun baritoneIndex(): JsonObject = Json.obj().apply {
+		addProperty("mod", "mc-puppeteer")
+		addProperty("component", "baritone")
+		addProperty("note", "Los comandos se envian como chat con prefijo '#'. La respuesta llega al chat: leela en /chat.")
+		add("get", JsonArray().apply {
+			READ_ONLY_ROUTES.forEach { add("GET  $BASE_PATH/baritone/$it") }
+		})
+		add("post", JsonArray().apply {
+			POST_ROUTES.forEach { add("POST $BASE_PATH/baritone/$it") }
+		})
+	}
+
+	private val READ_ONLY_ROUTES = listOf("version", "proc", "eta", "modified", "wp", "help", "find", "gc")
+	private val POST_ROUTES = listOf(
+		"goto", "goal", "mine", "build", "follow", "stop", "axis", "tunnel", "cleararea", "explore",
+		"surface", "top", "invert", "come", "blacklist", "elytra", "farm", "cancel", "path", "thisway",
+		"repack", "reloadall", "saveall", "render",
+	)
 
 	private fun indexBody(): JsonObject = JsonObject().apply {
 		addProperty("mod", "mc-puppeteer")
@@ -268,14 +393,17 @@ class PuenteHttpServer(
 	}
 
 	private fun queryInt(exchange: HttpExchange, name: String, default: Int, min: Int, max: Int): Int {
-		val raw = exchange.requestURI.query?.split('&')
-			?.firstOrNull { it.substringBefore('=') == name }
-			?.substringAfter('=', "")
-			?.takeIf { it.isNotEmpty() }
-			?: return default
+		val raw = queryString(exchange, name) ?: return default
 		return raw.toIntOrNull()?.takeIf { it in min..max }
 			?: throw HttpError(400, "invalid_query", "$name debe ser un entero entre $min y $max")
 	}
+
+	/** Valor de un parametro de query, o null si no esta o va vacio. */
+	private fun queryString(exchange: HttpExchange, name: String): String? =
+		exchange.requestURI.query?.split('&')
+			?.firstOrNull { it.substringBefore('=') == name }
+			?.substringAfter('=', "")
+			?.takeIf { it.isNotEmpty() }
 
 	/** Lee el body con tope de tamano: un body enorme no debe agotar la memoria. */
 	private fun readBody(exchange: HttpExchange): String {

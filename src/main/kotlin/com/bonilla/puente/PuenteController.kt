@@ -100,6 +100,54 @@ class PuenteController(
 		addProperty("uptimeMs", uptimeMillis)
 	}
 
+	// ------------------------------------------------------------- Baritone
+
+	/**
+	 * Envia un comando de Baritone como **mensaje de chat**, nunca como comando
+	 * de servidor. Es la diferencia que hace que esto funcione: Baritone
+	 * intercepta el prefijo `#` en el chat, mientras que `sendCommand` va al
+	 * servidor y lo rechaza.
+	 *
+	 * La respuesta de Baritone llega al chat, asi que se lee luego por
+	 * `/chat` o `/chat/history`.
+	 */
+	fun baritone(command: String): String {
+		mainThread.callOnMainThread { bridge.sendChat(command) }
+		return command
+	}
+
+	fun baritoneReadOnly(name: String, query: String?): String = baritone(BaritoneTranslator.readOnly(name, query))
+
+	fun baritoneMaintenance(name: String): String = baritone(BaritoneTranslator.maintenance(name))
+
+	fun baritoneNoArg(name: String): String = baritone(BaritoneTranslator.noArg(name))
+
+	fun baritoneGoto(x: Int?, y: Int?, z: Int?): String = baritone(BaritoneTranslator.goto(x, y, z))
+
+	fun baritoneGotoBlock(block: String): String = baritone(BaritoneTranslator.gotoBlock(block))
+
+	fun baritoneFind(block: String): String = baritone(BaritoneTranslator.find(block))
+
+	fun baritoneMine(block: String, amount: Int?): String = baritone(BaritoneTranslator.mine(block, amount))
+
+	fun baritoneBuild(file: String, origin: Triple<Int, Int, Int>?): String =
+		baritone(BaritoneTranslator.build(file, origin))
+
+	fun baritoneFollow(target: String): String = baritone(BaritoneTranslator.follow(target))
+
+	fun baritoneStop(force: Boolean): String = baritone(BaritoneTranslator.stop(force))
+
+	fun baritoneAxis(y: Int?): String = baritone(BaritoneTranslator.axis(y))
+
+	fun baritoneTunnel(height: Int, width: Int, length: Int): String =
+		baritone(BaritoneTranslator.tunnel(height, width, length))
+
+	fun baritoneCleararea(radius: Int): String = baritone(BaritoneTranslator.cleararea(radius))
+
+	fun baritoneExplore(x: Int?, z: Int?): String = baritone(BaritoneTranslator.explore(x, z))
+
+	fun baritoneGoal(x: Int?, y: Int?, z: Int?): String = baritone(BaritoneTranslator.goal(x, y, z))
+
 	private fun parseAddress(address: String): Pair<String, Int> {
 		val trimmed = address.trim()
 		if (trimmed.isEmpty()) throw HttpError(400, "invalid_address", "'address' vacio")

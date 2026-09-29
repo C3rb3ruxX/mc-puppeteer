@@ -76,6 +76,13 @@ object PuenteClient : ClientModInitializer {
 		logger.info("  Autenticacion: {}", if (config.requireToken) "Bearer token (obligatoria)" else "DESHABILITADA")
 		logger.info("  No se envia ningun dato fuera de esta maquina salvo que cambies 'host' en la config.")
 
+		if (!config.requireToken) {
+			logger.warn("ATENCION: sin token, cualquiera que alcance este puerto puede enviar chat y " +
+				"comandos con la cuenta de Minecraft activa. Es aceptable en {} porque solo escucha en " +
+				"loopback. Poner 'requireToken' a true en la config en cuanto se exponga a la red.",
+				if (config.isLoopback) "esta maquina" else "cualquier red que alcance ${config.host}:${config.port}")
+		}
+
 		ClientLifecycleEvents.CLIENT_STOPPING.register {
 			// Apagado limpio: si el proceso muere con el pool vivo, quedan hilos
 			// no-daemon colgando. Son daemon, pero se cierra igual por orden.
