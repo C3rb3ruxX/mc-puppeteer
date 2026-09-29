@@ -26,11 +26,11 @@ Minecraft**.
 ```
    source set: main  (sin NINGUNA clase de cliente de Minecraft)
   +--------------------------------------------------------------+
-  |  PuppeteerHttpServer   transporte: routing, auth, CORS        |
-  |  PuppeteerController    logica y validacion                   |
+  |  PuenteHttpServer   transporte: routing, auth, CORS        |
+  |  PuenteController    logica y validacion                   |
   |  MainThreadBridge       el UNICO cruce de hilos               |
   |  ChatLog                buffer acotado de mensajes           |
-  |  PuppeteerConfig        config JSON                          |
+  |  PuenteConfig        config JSON                          |
   |  MinecraftBridge        INTERFAZ (no implementada aqui)      |
   +--------------------------------------------------------------+
                             ^ implementa
@@ -39,7 +39,7 @@ Minecraft**.
   |  ClientBridge        llamadas reales a MC 26.3              |
   |  ClientMainThread    MainThreadExecutor sobre Minecraft     |
   |  ChatCapture         eventos de Fabric API                  |
-  |  McPuppeteerClient   costura y ciclo de vida                |
+  |  PuenteClient   costura y ciclo de vida                |
   +--------------------------------------------------------------+
 
   peticiones HTTP --> hilos "mc-puppeteer-http-N" (daemon)
@@ -71,23 +71,39 @@ cuelga, el juego no se entera.
 
 ## 3. Archivos
 
+### Convencion de nombres
+
+El codigo se llama `puente`. El resto de nombres **no** se renombraron, y es
+deliberado, porque son contratos que ya existen fuera del codigo:
+
+| Nombre | Valor | Por que no se cambia |
+|---|---|---|
+| Paquetes y clases | `com.bonilla.puente.*` | Codigo interno, renombrable sin coste. |
+| Id del mod | `mc-puppeteer` | Identidad del mod en Fabric. Aparece en la lista de mods, en los crash reports y en `config/mc-puppeteer.json`. Cambiarlo hace que el mod appears como uno nuevo y deja la config vieja huérfana. |
+| Base path HTTP | `/puppeteer` | Ya documentado; cambiarlo rompe clientes sin avisar. |
+| Plantilla | `McPuppeteer.kt`, `McPuppeteerDataGenerator.kt` | No son mios. Se dejan como estan para que un `git diff` contra la plantilla siga siendo legible. |
+
+Renombrar el id del mod y el base path son cambios de una linea cada uno si en
+algún momento se quieren; hasta entonces, mezclarlos con el renombrado del
+codigo habria hecho el commit mas dificil de revisar sin gain real.
+
 ### `main` - nucleo, sin dependencia de Minecraft
 
 | Archivo | Responsabilidad |
 |---|---|
-| `puppeteer/MinecraftBridge.kt` | Interfaz del puente + DTOs (`ClientStatus`, `RemotePlayerInfo`, `CapturedMessage`) y su serializacion explicita a JSON. |
-| `puppeteer/MainThreadBridge.kt` | `MainThreadExecutor` (interfaz) + `MainThreadBridge` (dispatcher con `CompletableFuture` y timeout) + `PuppeteerException`. |
-| `puppeteer/ChatLog.kt` | Buffer circular acotado con `snapshot` (copia) y `drain` (consumo). Contabiliza descartes. |
-| `puppeteer/PuppeteerConfig.kt` | Config JSON en `config/mc-puppeteer.json`, valores por defecto, `validate()`, guardado atomico. |
-| `puppeteer/PuppeteerController.kt` | Logica de negocio: validacion de mensaje/comando/direccion, y las llamadas al puente. |
-| `puppeteer/PuppeteerHttpServer.kt` | `com.sun.net.httpserver`, pool de hilos daemon, routing, auth, CORS, limite de tasa, tope de body. |
-| `puppeteer/http/Json.kt` | Envoltorio de Gson (ya viene con Minecraft) + `HttpError`. |
+| `puente/MinecraftBridge.kt` | Interfaz del puente + DTOs (`ClientStatus`, `RemotePlayerInfo`, `CapturedMessage`) y su serializacion explicita a JSON. |
+| `puente/MainThreadBridge.kt` | `MainThreadExecutor` (interfaz) + `MainThreadBridge` (dispatcher con `CompletableFuture` y timeout) + `PuenteException`. |
+| `puente/ChatLog.kt` | Buffer circular acotado con `snapshot` (copia) y `drain` (consumo). Contabiliza descartes. |
+| `puente/PuenteConfig.kt` | Config JSON en `config/mc-puppeteer.json`, valores por defecto, `validate()`, guardado atomico. |
+| `puente/PuenteController.kt` | Logica de negocio: validacion de mensaje/comando/direccion, y las llamadas al puente. |
+| `puente/PuenteHttpServer.kt` | `com.sun.net.httpserver`, pool de hilos daemon, routing, auth, CORS, limite de tasa, tope de body. |
+| `puente/http/Json.kt` | Envoltorio de Gson (ya viene con Minecraft) + `HttpError`. |
 
 ### `client` - lo unico que toca Minecraft
 
 | Archivo | Responsabilidad |
 |---|---|
-| `McPuppeteerClient.kt` | Lee config, valida, genera token si falta, monta el grafo, arranca/detiene el servidor. |
+| `PuenteClient.kt` | Lee config, valida, genera token si falta, monta el grafo, arranca/detiene el servidor. |
 | `ClientBridge.kt` | Implementa `MinecraftBridge` contra las APIs reales de 26.3. |
 | `ClientMainThread.kt` | `MainThreadExecutor` sobre `Minecraft.execute` / `isSameThread`. |
 | `ChatCapture.kt` | Registra `ClientReceiveMessageEvents` y `ClientSendMessageEvents`. |
@@ -117,7 +133,7 @@ Este es el requisito mas importante, asi que se documenta como tal.
 
 | Mecanismo | Donde | Que garantiza |
 |---|---|---|
-| Pool de hilos **daemon** propio | `PuppeteerHttpServer` | Cero trabajo de red en el hilo de render. |
+| Pool de hilos **daemon** propio | `PuenteHttpServer` | Cero trabajo de red en el hilo de render. |
 | `Minecraft.execute` para todo efecto | `MainThreadBridge` | El juego nunca se bloquea por una peticion. |
 | Captura de chat **O(1) y no bloqueante** | `ChatCapture` + `ChatLog` | El callback de chat (que corre en el hilo de render) solo hace `addLast` y, cada N mensajes, un `removeFirst`. Sin E/S, sin locks compartidos, sin asignaciones grandes. |
 | Buffer **acotado** | `ChatLog` | Si nadie consume por HTTP, la memoria no crece: se descartan los mensajes viejos. Tope configurable (`chatBufferSize`, por defecto 256). |

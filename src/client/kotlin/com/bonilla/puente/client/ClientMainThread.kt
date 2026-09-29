@@ -1,6 +1,6 @@
-package com.bonilla.client
+package com.bonilla.puente.client
 
-import com.bonilla.puppeteer.MainThreadExecutor
+import com.bonilla.puente.MainThreadExecutor
 import net.minecraft.client.Minecraft
 
 /**

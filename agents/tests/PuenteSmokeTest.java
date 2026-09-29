@@ -1,4 +1,4 @@
-import com.bonilla.puppeteer.*;
+import com.bonilla.puente.*;
 
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -11,7 +11,7 @@ import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /** Prueba de humo del nucleo HTTP con un puente falso, fuera de Minecraft. */
-public class PuppeteerSmokeTest {
+public class PuenteSmokeTest {
 	static final AtomicInteger onMainThreadCalls = new AtomicInteger();
 	static final HttpClient http = HttpClient.newHttpClient();
 	static String base;
@@ -19,16 +19,16 @@ public class PuppeteerSmokeTest {
 	static int failures = 0;
 
 	public static void main(String[] args) throws Exception {
-		PuppeteerConfig config = new PuppeteerConfig(
+		PuenteConfig config = new PuenteConfig(
 			true, "127.0.0.1", 25599, true, token, 64, 16384, 2000L, 2);
 
 		List<String> validate = config.validate();
 		check("[1] config valida sin problemas", validate.isEmpty(), String.valueOf(validate));
 
-		List<String> bad = new PuppeteerConfig(true, "127.0.0.1", 70000, true, "t", 256, 1024, 5000L, 4).validate();
+		List<String> bad = new PuenteConfig(true, "127.0.0.1", 70000, true, "t", 256, 1024, 5000L, 4).validate();
 		check("[2] validate detecta puerto fuera de rango", bad.size() == 1, String.valueOf(bad));
 
-		List<String> noToken = new PuppeteerConfig(true, "127.0.0.1", 25599, true, "", 256, 1024, 5000L, 4).validate();
+		List<String> noToken = new PuenteConfig(true, "127.0.0.1", 25599, true, "", 256, 1024, 5000L, 4).validate();
 		check("[3] validate detecta token vacio con requireToken", noToken.size() == 1, String.valueOf(noToken));
 
 		MainThreadExecutor main = new MainThreadExecutor() {
@@ -72,12 +72,12 @@ public class PuppeteerSmokeTest {
 			@Override public void dispose() {}
 		};
 
-		PuppeteerController controller = new PuppeteerController(
+		PuenteController controller = new PuenteController(
 			bridge, new MainThreadBridge(main, 2000L), new ChatLog(64), "1.0.0");
-		PuppeteerHttpServer server = new PuppeteerHttpServer(
+		PuenteHttpServer server = new PuenteHttpServer(
 			config, controller, org.slf4j.LoggerFactory.getLogger("smoke"));
 
-		PuppeteerHttpServer.StartResult result = server.start();
+		PuenteHttpServer.StartResult result = server.start();
 		check("[4] servidor arranca en 127.0.0.1:25599", result.getStarted(), String.valueOf(result.getBoundAddress()));
 		if (!result.getStarted()) return;
 		base = "http://127.0.0.1:25599/puppeteer";

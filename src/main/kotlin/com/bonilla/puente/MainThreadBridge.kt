@@ -1,4 +1,4 @@
-package com.bonilla.puppeteer
+package com.bonilla.puente
 
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ExecutionException
@@ -20,7 +20,7 @@ fun interface MainThreadExecutor {
 /**
  * Error de negocio que la capa HTTP traduce a un codigo y mensaje claros.
  */
-class PuppeteerException(val status: Int, val code: String, message: String) : RuntimeException(message)
+class PuenteException(val status: Int, val code: String, message: String) : RuntimeException(message)
 
 /**
  * Coordina el acceso entre los hilos HTTP y el hilo principal.
@@ -49,11 +49,11 @@ class MainThreadBridge(
 		return try {
 			future.get(timeoutMs, TimeUnit.MILLISECONDS)
 		} catch (e: TimeoutException) {
-			throw PuppeteerException(503, "main_thread_timeout", "El hilo principal de Minecraft no respondio en ${timeoutMs}ms")
+			throw PuenteException(503, "main_thread_timeout", "El hilo principal de Minecraft no respondio en ${timeoutMs}ms")
 		} catch (e: ExecutionException) {
 			val cause = e.cause ?: e
-			if (cause is PuppeteerException) throw cause
-			throw PuppeteerException(500, "main_thread_error", cause.message ?: cause.javaClass.name)
+			if (cause is PuenteException) throw cause
+			throw PuenteException(500, "main_thread_error", cause.message ?: cause.javaClass.name)
 		}
 	}
 }

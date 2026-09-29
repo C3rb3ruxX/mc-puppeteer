@@ -1,7 +1,7 @@
-package com.bonilla.client
+package com.bonilla.puente.client
 
-import com.bonilla.puppeteer.CapturedMessage
-import com.bonilla.puppeteer.ChatLog
+import com.bonilla.puente.CapturedMessage
+import com.bonilla.puente.ChatLog
 import net.fabricmc.fabric.api.client.message.v1.ClientReceiveMessageEvents
 import net.fabricmc.fabric.api.client.message.v1.ClientSendMessageEvents
 import java.time.Instant

@@ -1,9 +1,9 @@
-package com.bonilla.puppeteer
+package com.bonilla.puente
 
-import com.bonilla.puppeteer.http.HttpError
-import com.bonilla.puppeteer.http.Json
-import com.bonilla.puppeteer.http.Json.optInt
-import com.bonilla.puppeteer.http.Json.optString
+import com.bonilla.puente.http.HttpError
+import com.bonilla.puente.http.Json
+import com.bonilla.puente.http.Json.optInt
+import com.bonilla.puente.http.Json.optString
 import com.google.gson.JsonObject
 
 /**
@@ -13,7 +13,7 @@ import com.google.gson.JsonObject
  * listos para serializar. Toda llamada a [MinecraftBridge] pasa por
  * [MainThreadBridge], de modo que aqui nunca se toca el juego desde un hilo HTTP.
  */
-class PuppeteerController(
+class PuenteController(
 	private val bridge: MinecraftBridge,
 	private val mainThread: MainThreadBridge,
 	private val chatLog: ChatLog,
@@ -73,7 +73,7 @@ class PuppeteerController(
 	fun connect(body: JsonObject): String {
 		// Forma preferida: "address": "host:puerto" (acepta tambien "host" sin puerto).
 		var host = body.optString("host")?.trim().orEmpty()
-		var port = body.optInt("port") ?: PuppeteerConfig.DEFAULT_PORT
+		var port = body.optInt("port") ?: PuenteConfig.DEFAULT_PORT
 		val address = body.optString("address")?.trim()
 		if (address != null && address.isNotEmpty()) {
 			val parsed = parseAddress(address)
@@ -110,15 +110,15 @@ class PuppeteerController(
 			if (end < 0) throw HttpError(400, "invalid_address", "direccion IPv6 sin cerrar: $address")
 			val host = trimmed.substring(1, end)
 			val rest = trimmed.substring(end + 1)
-			val port = if (rest.startsWith(":")) parsePort(rest.substring(1), address) else PuppeteerConfig.DEFAULT_PORT
+			val port = if (rest.startsWith(":")) parsePort(rest.substring(1), address) else PuenteConfig.DEFAULT_PORT
 			return host to port
 		}
 
 		val lastColon = trimmed.lastIndexOf(':')
-		if (lastColon < 0) return trimmed to PuppeteerConfig.DEFAULT_PORT
+		if (lastColon < 0) return trimmed to PuenteConfig.DEFAULT_PORT
 
 		// Sin puntos y con dos puntos es IPv6 sin puerto -> no tratarlo como host:puerto.
-		if (trimmed.count { it == ':' } > 1) return trimmed to PuppeteerConfig.DEFAULT_PORT
+		if (trimmed.count { it == ':' } > 1) return trimmed to PuenteConfig.DEFAULT_PORT
 
 		return trimmed.substring(0, lastColon) to parsePort(trimmed.substring(lastColon + 1), address)
 	}

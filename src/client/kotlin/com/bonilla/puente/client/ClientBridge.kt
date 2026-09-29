@@ -1,9 +1,9 @@
-package com.bonilla.client
+package com.bonilla.puente.client
 
-import com.bonilla.puppeteer.ClientStatus
-import com.bonilla.puppeteer.MinecraftBridge
-import com.bonilla.puppeteer.PuppeteerException
-import com.bonilla.puppeteer.RemotePlayerInfo
+import com.bonilla.puente.ClientStatus
+import com.bonilla.puente.MinecraftBridge
+import com.bonilla.puente.PuenteException
+import com.bonilla.puente.RemotePlayerInfo
 import net.minecraft.SharedConstants
 import net.minecraft.client.Minecraft
 import net.minecraft.client.gui.screens.ConnectScreen
@@ -87,7 +87,7 @@ class ClientBridge(
 		val address = try {
 			ServerAddress(host, port)
 		} catch (e: Exception) {
-			throw PuppeteerException(400, "invalid_address", "Direccion no valida $host:$port - ${e.message}")
+			throw PuenteException(400, "invalid_address", "Direccion no valida $host:$port - ${e.message}")
 		}
 
 		val data = ServerData(name, "$host:$port", ServerData.Type.OTHER)
@@ -101,7 +101,7 @@ class ClientBridge(
 	override fun disconnect() {
 		val mc = Minecraft.getInstance()
 		if (mc.level == null && mc.getConnection() == null) {
-			throw PuppeteerException(409, "not_connected", "El cliente no esta conectado a ningun mundo")
+			throw PuenteException(409, "not_connected", "El cliente no esta conectado a ningun mundo")
 		}
 		mc.disconnectFromWorld(Component.translatable("menu.quitting"))
 		logger.info("Desconexion solicitada por la API HTTP")
@@ -125,7 +125,7 @@ class ClientBridge(
 
 	private fun requireConnection() =
 		Minecraft.getInstance().getConnection()
-			?: throw PuppeteerException(409, "not_connected", "El cliente no esta conectado a ningun servidor")
+			?: throw PuenteException(409, "not_connected", "El cliente no esta conectado a ningun servidor")
 
 	companion object {
 		/** Resuelto una sola vez: la version de MC no cambia durante la sesion. */

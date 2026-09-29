@@ -1,4 +1,4 @@
-package com.bonilla.puppeteer
+package com.bonilla.puente
 
 import java.util.ArrayDeque
 

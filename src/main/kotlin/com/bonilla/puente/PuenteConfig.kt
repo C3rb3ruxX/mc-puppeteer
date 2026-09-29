@@ -1,4 +1,4 @@
-package com.bonilla.puppeteer
+package com.bonilla.puente
 
 import com.google.gson.GsonBuilder
 import com.google.gson.JsonSyntaxException
@@ -14,7 +14,7 @@ import java.nio.file.StandardCopyOption
  * constructor sin argumentos que Gson necesita para instanciarla: los campos
  * ausentes en el archivo conservan el valor por defecto.
  */
-data class PuppeteerConfig(
+data class PuenteConfig(
 	var enabled: Boolean = true,
 	var host: String = DEFAULT_HOST,
 	var port: Int = DEFAULT_PORT,
@@ -49,26 +49,26 @@ data class PuppeteerConfig(
 		fun configFile(): Path =
 			FabricLoader.getInstance().configDir.resolve("mc-puppeteer.json")
 
-		fun load(path: Path = configFile()): PuppeteerConfig {
+		fun load(path: Path = configFile()): PuenteConfig {
 			if (!Files.exists(path)) {
-				val fresh = PuppeteerConfig()
+				val fresh = PuenteConfig()
 				save(fresh, path)
 				return fresh
 			}
 
 			return try {
 				val text = Files.readString(path)
-				GSON.fromJson(text, PuppeteerConfig::class.java) ?: PuppeteerConfig()
+				GSON.fromJson(text, PuenteConfig::class.java) ?: PuenteConfig()
 			} catch (e: JsonSyntaxException) {
 				System.err.println("[mc-puppeteer] config invalido, se usan valores por defecto: ${e.message}")
-				PuppeteerConfig()
+				PuenteConfig()
 			} catch (e: Exception) {
 				System.err.println("[mc-puppeteer] no se pudo leer la config, se usan valores por defecto: ${e.message}")
-				PuppeteerConfig()
+				PuenteConfig()
 			}
 		}
 
-		fun save(config: PuppeteerConfig, path: Path = configFile()) {
+		fun save(config: PuenteConfig, path: Path = configFile()) {
 			Files.createDirectories(path.parent)
 			val tmp = path.resolveSibling("${path.fileName}.tmp")
 			Files.writeString(tmp, GSON.toJson(config))

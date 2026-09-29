@@ -1,11 +1,11 @@
-package com.bonilla.client
+package com.bonilla.puente.client
 
 import com.bonilla.McPuppeteer
-import com.bonilla.puppeteer.ChatLog
-import com.bonilla.puppeteer.MainThreadBridge
-import com.bonilla.puppeteer.PuppeteerConfig
-import com.bonilla.puppeteer.PuppeteerController
-import com.bonilla.puppeteer.PuppeteerHttpServer
+import com.bonilla.puente.ChatLog
+import com.bonilla.puente.MainThreadBridge
+import com.bonilla.puente.PuenteConfig
+import com.bonilla.puente.PuenteController
+import com.bonilla.puente.PuenteHttpServer
 import net.fabricmc.api.ClientModInitializer
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientLifecycleEvents
 import org.slf4j.LoggerFactory
@@ -19,14 +19,14 @@ import java.util.Base64
  * El nucleo (source set `main`) no sabe nada de Minecraft; este archivo es el
  * unico que hace de costura entre ambos mundos.
  */
-object McPuppeteerClient : ClientModInitializer {
+object PuenteClient : ClientModInitializer {
 
 	private val logger = LoggerFactory.getLogger(McPuppeteer.MOD_ID)
 
-	private var server: PuppeteerHttpServer? = null
+	private var server: PuenteHttpServer? = null
 
 	override fun onInitializeClient() {
-		val config = PuppeteerConfig.load()
+		val config = PuenteConfig.load()
 		val problems = config.validate()
 
 		if (!config.enabled) {
@@ -43,7 +43,7 @@ object McPuppeteerClient : ClientModInitializer {
 		if (config.requireToken && config.authToken.isBlank()) {
 			val generated = generateToken()
 			config.authToken = generated
-			PuppeteerConfig.save(config)
+			PuenteConfig.save(config)
 			logger.warn(
 				"Se genero un token de autorizacion nuevo. Guardalo: solo se muestra una vez. " +
 					"Usalo como 'Authorization: Bearer <token>'",
@@ -53,7 +53,7 @@ object McPuppeteerClient : ClientModInitializer {
 
 		val chatLog = ChatLog(config.chatBufferSize)
 		val bridge = ClientBridge(modVersion(), logger)
-		val controller = PuppeteerController(
+		val controller = PuenteController(
 			bridge = bridge,
 			mainThread = MainThreadBridge(ClientMainThread, config.requestTimeoutMs),
 			chatLog = chatLog,
@@ -62,7 +62,7 @@ object McPuppeteerClient : ClientModInitializer {
 
 		ChatCapture(chatLog).register()
 
-		val http = PuppeteerHttpServer(config, controller, logger)
+		val http = PuenteHttpServer(config, controller, logger)
 		val result = http.start()
 		server = http
 
@@ -86,9 +86,9 @@ object McPuppeteerClient : ClientModInitializer {
 	}
 
 	/** Deja la config en un estado arrancable tras un `validate()` fallido. */
-	private fun applyDefaults(config: PuppeteerConfig) {
-		if (config.port !in 1..65535) config.port = PuppeteerConfig.DEFAULT_PORT
-		if (config.host.isBlank()) config.host = PuppeteerConfig.DEFAULT_HOST
+	private fun applyDefaults(config: PuenteConfig) {
+		if (config.port !in 1..65535) config.port = PuenteConfig.DEFAULT_PORT
+		if (config.host.isBlank()) config.host = PuenteConfig.DEFAULT_HOST
 		if (config.httpThreads !in 1..64) config.httpThreads = 4
 		if (config.chatBufferSize !in 16..65536) config.chatBufferSize = 256
 		if (config.maxBodyBytes !in 256..1_048_576) config.maxBodyBytes = 16 * 1024

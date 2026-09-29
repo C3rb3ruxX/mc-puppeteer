@@ -37,7 +37,7 @@ La documentacion vive en [`agents/`](agents/), en este orden:
 | [`01-addendum-hallazgos.md`](agents/01-addendum-hallazgos.md) | Lo que se descubrio **al compilar**: `Minecraft` ya no tiene `screen`, `disconnect` cambio de firma, MC 26.3 trae anotaciones de nulabilidad, y demas. |
 | [`02-implementacion.md`](agents/02-implementacion.md) | Documento de construccion: arquitectura, ficheros, garantias de rendimiento, seguridad, API completa, tabla de errores, y donde se desvia del plan. |
 | [`03-testing.md`](agents/03-testing.md) | Como ejecutar la prueba de humo, que cubre, y que queda sin cubrir. |
-| [`tests/PuppeteerSmokeTest.java`](agents/tests/PuppeteerSmokeTest.java) | 48 aserciones sobre el nucleo HTTP, ejecutables sin Minecraft. |
+| [`tests/PuenteSmokeTest.java`](agents/tests/PuenteSmokeTest.java) | 48 aserciones sobre el nucleo HTTP, ejecutables sin Minecraft. |
 
 ## Compilar
 

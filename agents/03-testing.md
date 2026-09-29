@@ -14,12 +14,12 @@ La prueba de humo cubre todo el nucleo, incluida la garantia central del mod:
 
 ## 1. Como se ejecuta
 
-`tests/PuppeteerSmokeTest.java` es un programa Java autonomo (sin JUnit, sin
+`tests/PuenteSmokeTest.java` es un programa Java autonomo (sin JUnit, sin
 red de pruebas) que:
 
 1. construye un `MinecraftBridge` **falso** que solo registra en que hilo se
    le llamo,
-2. levanta un `PuppeteerHttpServer` real en `127.0.0.1:25599`,
+2. levanta un `PuenteHttpServer` real en `127.0.0.1:25599`,
 3. le manda 48 peticiones con `java.net.http.HttpClient`,
 4. comprueba estado HTTP, codigo de error y contenido,
 5. comprueba que el buffer acotado se comporta,
@@ -47,8 +47,8 @@ $cp = @(
 ) + $slf4j
 $full = ($cp -join ';')
 
-& "C:\Program Files\Java\jdk-25.0.2\bin\javac.exe" -nowarn -cp $full -d "$tmp\out" agents\tests\PuppeteerSmokeTest.java
-& "C:\Program Files\Java\jdk-25.0.2\bin\java.exe"  -cp "$tmp\out;$full" PuppeteerSmokeTest
+& "C:\Program Files\Java\jdk-25.0.2\bin\javac.exe" -nowarn -cp $full -d "$tmp\out" agents\tests\PuenteSmokeTest.java
+& "C:\Program Files\Java\jdk-25.0.2\bin\java.exe"  -cp "$tmp\out;$full" PuenteSmokeTest
 ```
 
 Sale con codigo de salida 1 si algo falla, asi que sirve directamente en CI.
@@ -59,7 +59,7 @@ Sale con codigo de salida 1 si algo falla, asi que sirve directamente en CI.
 ### Fichero de copia
 
 El fichero de este repositorio es la version canonica. Su nombre de clase
-coincide con el del fichero (`PuppeteerSmokeTest`), que es lo que exige Java
+coincide con el del fichero (`PuenteSmokeTest`), que es lo que exige Java
 para una clase publica; el comando de arriba invoca ese nombre.
 
 Hubo antes una copia en `%TEMP%\opencode\SmokeTest.java` con el nombre corto

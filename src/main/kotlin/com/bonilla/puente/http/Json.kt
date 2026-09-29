@@ -1,4 +1,4 @@
-package com.bonilla.puppeteer.http
+package com.bonilla.puente.http
 
 import com.google.gson.Gson
 import com.google.gson.GsonBuilder

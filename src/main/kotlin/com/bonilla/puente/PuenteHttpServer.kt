@@ -1,9 +1,9 @@
-package com.bonilla.puppeteer
+package com.bonilla.puente
 
-import com.bonilla.puppeteer.http.HttpError
-import com.bonilla.puppeteer.http.Json
-import com.bonilla.puppeteer.http.Json.optInt
-import com.bonilla.puppeteer.http.Json.requireString
+import com.bonilla.puente.http.HttpError
+import com.bonilla.puente.http.Json
+import com.bonilla.puente.http.Json.optInt
+import com.bonilla.puente.http.Json.requireString
 import com.google.gson.JsonArray
 import com.google.gson.JsonObject
 import com.sun.net.httpserver.HttpExchange
@@ -29,9 +29,9 @@ import java.util.concurrent.atomic.AtomicInteger
  *
  * Usa `com.sun.net.httpserver` de la JDK para no anadir dependencias.
  */
-class PuppeteerHttpServer(
-	private val config: PuppeteerConfig,
-	private val controller: PuppeteerController,
+class PuenteHttpServer(
+	private val config: PuenteConfig,
+	private val controller: PuenteController,
 	private val logger: Logger,
 ) {
 	private var server: HttpServer? = null
@@ -141,7 +141,7 @@ class PuppeteerHttpServer(
 			dispatch(exchange, route)
 		} catch (e: HttpError) {
 			send(exchange, e.status, errorBody(e.code, e.message ?: e.code))
-		} catch (e: PuppeteerException) {
+		} catch (e: PuenteException) {
 			send(exchange, e.status, errorBody(e.code, e.message ?: e.code))
 		} catch (e: Exception) {
 			logger.error("Error no controlado en {} {}", exchange.requestMethod, exchange.requestURI.path, e)

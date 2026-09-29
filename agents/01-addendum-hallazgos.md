@@ -106,7 +106,7 @@ funcione**. Hay que resolver el valor o lanzar excepcion.
 
 ## 6. Correcciones que salio la prueba de humo
 
-Las ejecuto `agents/tests/PuppeteerSmokeTest.java` (48 aserciones). Dos fallos
+Las ejecuto `agents/tests/PuenteSmokeTest.java` (48 aserciones). Dos fallos
 eran bugs reales del nucleo, no de la prueba:
 
 ### 6.1 Codigos de error inconsistentes

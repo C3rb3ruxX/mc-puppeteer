@@ -19,7 +19,7 @@
 		],
 		"client": [
 			{
-				"value": "com.bonilla.client.McPuppeteerClient",
+				"value": "com.bonilla.puente.client.PuenteClient",
 				"adapter": "kotlin"
 			}
 		],

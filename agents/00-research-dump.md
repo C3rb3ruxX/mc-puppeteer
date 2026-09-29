@@ -50,7 +50,7 @@ src/
 │       └── assets/mc-puppeteer/icon.png
 └── client/
     ├── java/com/bonilla/client/mixin/ExampleClientMixin.java
-    ├── kotlin/com/bonilla/client/McPuppeteerClient.kt   (ClientModInitializer)
+    ├── kotlin/com/bonilla/client/PuenteClient.kt   (ClientModInitializer)
     ├── kotlin/com/bonilla/client/McPuppeteerDataGenerator.kt
     └── resources/mc-puppeteer.client.mixins.json
 ```
