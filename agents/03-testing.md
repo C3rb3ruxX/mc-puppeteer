@@ -58,9 +58,14 @@ Sale con codigo de salida 1 si algo falla, asi que sirve directamente en CI.
 
 ### Fichero de copia
 
-La version que se ejecuto esta tambien en
-`%TEMP%\opencode\SmokeTest.java` (clase `SmokeTest`); la de este repositorio es
-la misma con el nombre de clase alineado al proyecto.
+El fichero de este repositorio es la version canonica. Su nombre de clase
+coincide con el del fichero (`PuppeteerSmokeTest`), que es lo que exige Java
+para una clase publica; el comando de arriba invoca ese nombre.
+
+Hubo antes una copia en `%TEMP%\opencode\SmokeTest.java` con el nombre corto
+`SmokeTest`. Esa variante daba 48/48 igual, pero rompia el comando documentado
+en cuanto se copiaba al repositorio, porque `javac` no acepta una clase
+publica cuyo nombre no coincida con el del `.java`. Se renombro al integrarla.
 
 ---
 

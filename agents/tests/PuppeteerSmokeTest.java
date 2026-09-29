@@ -11,7 +11,7 @@ import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /** Prueba de humo del nucleo HTTP con un puente falso, fuera de Minecraft. */
-public class SmokeTest {
+public class PuppeteerSmokeTest {
 	static final AtomicInteger onMainThreadCalls = new AtomicInteger();
 	static final HttpClient http = HttpClient.newHttpClient();
 	static String base;
