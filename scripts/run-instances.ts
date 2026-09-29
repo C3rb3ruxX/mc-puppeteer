@@ -544,6 +544,29 @@ const writeOptions = (gameDir: string): void => {
 
 // --------------------------------------------------------------------------- plan
 
+/**
+ * Registro de lo que hay levantado, para que otras herramientas (el TUI de
+ * `scripts/tui.ts`) no tengan que adivinar puertos.
+ */
+const writeRegistry = (opts: Options, projectDir: string, planned: Instance[]): void => {
+	const root = resolve(projectDir, opts.dir)
+	const path = join(root, '.instances.json')
+	writeJsonAtomic(path, {
+		generatedAt: new Date().toISOString(),
+		dir: root,
+		instances: planned.map(inst => ({
+			name: inst.name,
+			host: inst.host,
+			port: inst.port,
+			token: inst.requireToken ? inst.token : '',
+			requireToken: inst.requireToken,
+			gameDir: inst.dir,
+			log: inst.logFile,
+		})),
+	})
+	say(`Registro de instancias: ${path}`)
+}
+
 const planInstances = async (opts: Options, projectDir: string, baritone: string | null): Promise<Instance[]> => {
 	const root = ensureDir(resolve(projectDir, opts.dir))
 	const taken = new Set<number>()
@@ -752,6 +775,7 @@ const main = async (): Promise<void> => {
 	const baritone = await ensureBaritone(opts, projectDir)
 	const planned = await planInstances(opts, projectDir, baritone)
 	running.push(...planned)
+	writeRegistry(opts, projectDir, planned)
 
 	say('')
 	for (const inst of planned) {

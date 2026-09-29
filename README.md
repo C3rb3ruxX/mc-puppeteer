@@ -64,7 +64,8 @@ bun   scripts/run-instances.ts -n 3
 node scripts/run-instances.ts -n 3
 ```
 
-Si el puerto 25580 esta ocupado, el siguiente cliente usa el 25581. Detalle en
+Si el puerto 25580 esta ocupado, el siguiente cliente usa el 25581. Para
+ver el estado de todos y mandar ordenes a la vez: `scripts/tui.ts`. Detalle en
 [`07-instancias-simultaneas.md`](agents/07-instancias-simultaneas.md).
 
 ## Advertencia

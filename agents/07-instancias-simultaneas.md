@@ -8,6 +8,7 @@ tocar `~/.minecraft` y sin el `./gradlew runClient` (que solo admite una).
 |---|---|
 | [`../scripts/run-instances.ts`](../scripts/run-instances.ts) | El lanzador. Bun o Node, cero dependencias. |
 | [`../scripts/gradle-run-config.init.gradle`](../scripts/gradle-run-config.init.gradle) | Tarea `dumpRunConfig`: le dice al script como arranca Loom el cliente. |
+| [`../scripts/tui.ts`](../scripts/tui.ts) | Panel de control: ver el estado de todas y mandarles la misma orden a varias. |
 
 ## Uso
 
@@ -98,11 +99,110 @@ run-instances/mc1/
   logs/stdout.log            stdout+stderr del cliente
   logs/latest.log            log del juego
   saves/, resourcepacks/, servers.dat, ...
+run-instances/.instances.json  registro: nombre, puerto, token y carpeta de cada una
 scripts/.cache/              baritone + argfiles
 scripts/.run-config.json     lo que dice Gradle
 ```
 
 Los ultimos tres estan en `.gitignore`.
+
+El registro lo escribe el lanzador al arrancar y lo lee el TUI, que asi no
+tiene que adivinar puertos (ademas barre `--scan-from`..`--scan-to` por si
+alguien arranco los clientes a mano).
+
+## Panel de control: `scripts/tui.ts`
+
+```bash
+bun   scripts/tui.ts          # o: node scripts/tui.ts
+```
+
+Muestra una tabla con el estado de cada instancia y una linea de ordenes. Sin
+dependencias: solo `node:fs`, `node:path`, `node:process`, `node:url` y `fetch`.
+No usa `readline`: lee el teclado byte a byte (`setRawMode` + eventos `data`),
+que es lo unico que funciona igual en Bun y en Node.
+
+```
+mc-puppeteer  3 instancia(s), 3 viva(s)  cada 2s  23:52:02
+──────────────────────────────────────────────────────────────────────────────
+inst    puerto estado              mundo         dim    jug    fps  ms
+● 1. mc1  25580                      -             -      0/?    -    3002
+● 2. mc2  25581  127.0.0.1           -             overwo…0/0    1    639
+● 3. mc3  25582  127.0.0.1           -             overwo…2/0    1    640
+──────────────────────────────────────────────────────────────────────────────
+  mc3    <mc2> prueba final
+  mc2    <mc3> prueba final
+> @1,3 cmd list
+──────────────────────────────────────────────────────────────────────────────
+> 
+/say /cmd /baritone /connect /disconnect /respawn /profile /history /log /every /scan /token /sel /quit · @1,3 · 1-9 · Q
+```
+
+- Verde: responde. **Amarillo**: vive pero el estado no ha llegado (el hilo
+  principal del juego esta ocupado; se comprueba con `/health`, que no lo toca).
+  **Rojo**: no responde.
+- El `feed` es el chat de todas las instancias mezclado. Se lee de
+  `/chat/history` **sin vaciar los buffers** del mod: se remember la marca de
+  tiempo del ultimo mensaje y solo se pinta lo posterior. Al abrir el panel no
+  se vuelca el historial anterior.
+
+### Mandar la misma orden a varias
+
+| Como | A quien |
+|---|---|
+| `say hola` | las seleccionadas (por defecto, todas) |
+| `!hola` | atajo de `say` |
+| `@2 cmd list` | la instancia 2 |
+| `@1,3 say hola` | la 1 y la 3 |
+| `@mc2 connect 1.2.3.4:25565` | la que se llama `mc2` |
+| `@all ...` | todas, seleccionadas o no |
+
+Ordenes: `say`/`chat`, `cmd`, `connect`, `disconnect`, `respawn`, `profile`,
+`status`, `health`, `players`, `history [n]`, `baritone`, mas las del panel:
+`every <seg>`, `scan`, `token <t>`, `sel <n|all|none>`, `log <n> [mcN]`,
+`target`, `clear`, `help`, `quit`. Con `/` delante o tal cual.
+
+`baritone` usa el endpoint propio (`GET /baritone/version`, `/proc`, `/eta`,
+`/modified`, `/paused`, `/wp`, `/gc`) y para todo lo demando manda la orden por
+chat con `#`, que es como Baritone la espera y asi admite argumentos libres
+(`#goto 100 64 200`).
+
+### Teclas
+
+Con la linea **vacia**: `1`-`9` seleccionan, `a` todas, `n` ninguna,
+`r` refresca, `l` ultimas lineas del log, `Q` sale. `Ctrl-C` o `Esc` salen
+siempre. Flechas y `RePag`/`AvPag` recorren el feed. Escribiendo texto, todas
+las teclas van al texto (por eso `q` no sale: `Q` si, para poder mandar
+`quieto` por chat).
+
+### Modo script
+
+Sin panel, util en cron o desde otro script:
+
+```bash
+node scripts/tui.ts --once --connect 1.2.3.4:25565   # manda y sale
+node scripts/tui.ts --every 10 -c "say revision"     # repite cada 10 s
+node scripts/tui.ts --every 2                         # sin TTY: como `watch`
+```
+
+Opciones: `--registry F`, `--scan-from N`, `--scan-to N`, `-e/--every SEG`,
+`--token T`, `--host H`, `--dir D`, `-c/--command TXT`, `--once`, `--no-color`,
+`-h/--help`.
+
+### Verificado
+
+Con 3 instancias conectadas al servidor de `127.0.0.1:25565`:
+
+- La tabla se refresca sola cada 2 s con pantalla, mundo, dimension, jugadores,
+  FPS y latencia de `/status`.
+- `say prueba final` a las 3: mc2 y mc3 respondieron `202 {"sent":...}` y el
+  eco `<mc2> prueba final` / `<mc3> prueba final` llego al feed de las otras
+  (cada una ve la red, por eso sale repetido).
+- `2` deselecciono mc2 y `@1,3 cmd list` solo fue a mc1 y mc3.
+- `every 1` cambio el intervalo en caliente; `Q` salio limpio.
+- `--once -c '@2 say cuidado'` -> `1 instancia(s)`, solo mc2.
+- `@all baritone version` -> `{"sent":"#version"}` en mc2 y mc3.
+- Sin registro (copiando el script fuera del repo) discovery por barrido de
+  puertos: losinio como `:25580`, `:25581`, `:25582`.
 
 ## Verificado en una sesion real
 
