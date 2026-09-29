@@ -32,6 +32,8 @@ class PuenteController(
 
 	fun players(): List<RemotePlayerInfo> = mainThread.callOnMainThread { bridge.onlinePlayers() }
 
+	fun inventory(): PlayerInventory = mainThread.callOnMainThread { bridge.inventory() }
+
 	fun chat(limit: Int): List<CapturedMessage> = chatLog.drain(limit, all = false)
 
 	fun chatHistory(limit: Int): List<CapturedMessage> = chatLog.snapshot(limit)

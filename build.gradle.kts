@@ -72,12 +72,28 @@ java {
 }
 
 tasks.jar {
-	val projectName = project.name
-	inputs.property("projectName", projectName)
+    val projectName = project.name
+    inputs.property("projectName", projectName)
 
-	from("LICENSE") {
-		rename { "${it}_$projectName" }
-	}
+    from("LICENSE") {
+        rename { "${it}_$projectName" }
+    }
+}
+
+/**
+ * Panel de control de instancias.
+ *
+ * Es un programa independiente que usa las clases de `main` (solo necesita el
+ * Gson que ya trae Minecraft), asi que se puede levantar sin arrancar el juego:
+ *
+ *     ./gradlew runDashboard
+ *     ./gradlew runDashboard --args="--port 25590"
+ */
+tasks.register<JavaExec>("runDashboard") {
+    group = "application"
+    description = "Arranca el panel web de control de instancias en http://127.0.0.1:25590"
+    mainClass.set("com.bonilla.puente.dashboard.Dashboard")
+    classpath = sourceSets.main.get().runtimeClasspath
 }
 
 // configure the maven publication

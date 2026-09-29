@@ -1,0 +1,559 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Puente · Panel de instancias</title>
+<style>
+:root {
+  --bg: #0e1116;
+  --panel: #161b22;
+  --panel-2: #1c232c;
+  --line: #2a323d;
+  --text: #e6edf3;
+  --muted: #8b949e;
+  --accent: #2f81f7;
+  --ok: #3fb950;
+  --warn: #d29922;
+  --bad: #f85149;
+  --radius: 10px;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 14px/1.5 ui-sans-serif, system-ui, "Segoe UI", Roboto, sans-serif;
+}
+header {
+  display: flex; align-items: center; gap: 16px;
+  padding: 14px 20px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+  position: sticky; top: 0; z-index: 10;
+}
+header h1 { font-size: 16px; margin: 0; font-weight: 600; letter-spacing: .2px; }
+header .sub { color: var(--muted); font-size: 12px; }
+header .spacer { flex: 1; }
+main { padding: 20px; max-width: 1500px; margin: 0 auto; }
+
+.dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; flex: none; }
+.dot.on { background: var(--ok); box-shadow: 0 0 7px var(--ok); }
+.dot.off { background: var(--bad); }
+
+.btn {
+  background: var(--panel-2); color: var(--text);
+  border: 1px solid var(--line); border-radius: 7px;
+  padding: 6px 11px; cursor: pointer; font-size: 13px; font-family: inherit;
+  transition: background .12s, border-color .12s;
+}
+.btn:hover:not(:disabled) { background: #263040; border-color: #3d4855; }
+.btn:disabled { opacity: .4; cursor: not-allowed; }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.btn.primary:hover:not(:disabled) { background: #1f6feb; }
+.btn.danger { border-color: #5a2a2a; color: #ff9a92; }
+.btn.danger:hover:not(:disabled) { background: #3d1d1d; }
+
+.grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fill, minmax(430px, 1fr)); }
+
+.card {
+  background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); overflow: hidden;
+}
+.card > .head {
+  display: flex; align-items: center; gap: 10px;
+  padding: 12px 14px; background: var(--panel-2);
+  border-bottom: 1px solid var(--line);
+}
+.card > .head .name { font-weight: 600; }
+.card > .head .port { color: var(--muted); font-size: 12px; font-family: ui-monospace, monospace; }
+.card > .head .spacer { flex: 1; }
+
+.body { padding: 14px; display: flex; flex-direction: column; gap: 14px; }
+
+.stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 9px; }
+.stat { background: var(--panel-2); border: 1px solid var(--line); border-radius: 7px; padding: 7px 9px; }
+.stat .k { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .4px; }
+.stat .v { font-size: 13px; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stat .v.empty { color: var(--muted); font-style: italic; }
+
+.pill { font-size: 11px; padding: 2px 8px; border-radius: 20px; border: 1px solid; white-space: nowrap; }
+.pill.ok { color: var(--ok); border-color: #1d572a; background: #0f2c16; }
+.pill.warn { color: var(--warn); border-color: #5c4a12; background: #2b2210; }
+.pill.bad { color: var(--bad); border-color: #5c2222; background: #2d1414; }
+
+.sect { border-top: 1px solid var(--line); padding-top: 12px; }
+.sect > h3 {
+  margin: 0 0 9px; font-size: 11px; text-transform: uppercase;
+  letter-spacing: .6px; color: var(--muted); font-weight: 600;
+}
+.row { display: flex; gap: 7px; flex-wrap: wrap; align-items: center; }
+.row + .row { margin-top: 7px; }
+input, select {
+  background: #0d1117; color: var(--text); border: 1px solid var(--line);
+  border-radius: 6px; padding: 6px 9px; font-size: 13px; font-family: inherit; min-width: 0;
+}
+input:focus, select:focus { outline: none; border-color: var(--accent); }
+input.n { width: 74px; }
+input.grow { flex: 1; }
+
+/* Rejilla de inventario: 9 columnas para la barra rapida, tal y como se ve en el juego. */
+.inv { display: grid; grid-template-columns: repeat(9, 1fr); gap: 4px; }
+.slot {
+  aspect-ratio: 1; background: #0d1117; border: 1px solid var(--line);
+  border-radius: 5px; display: flex; align-items: center; justify-content: center;
+  font-size: 10px; text-align: center; padding: 2px; position: relative;
+  overflow: hidden; color: var(--muted); line-height: 1.1;
+}
+.slot.filled { color: var(--text); border-color: #3d4855; }
+.slot .n { position: absolute; right: 2px; bottom: 1px; font-size: 9px; color: var(--warn); }
+.slot.sel { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.armor { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; margin-top: 8px; }
+
+.log {
+  max-height: 170px; overflow-y: auto; background: #0d1117;
+  border: 1px solid var(--line); border-radius: 7px; padding: 8px;
+  font-family: ui-monospace, Consolas, monospace; font-size: 11.5px;
+}
+.log div { padding: 1px 0; border-bottom: 1px solid #151b23; }
+.log .t { color: var(--muted); }
+.log .sys { color: var(--accent); }
+.log .err { color: var(--bad); }
+.log .ok { color: var(--ok); }
+
+.hidden { display: none !important; }
+.empty-note { color: var(--muted); font-style: italic; font-size: 12px; }
+.hint { color: var(--muted); font-size: 11px; margin-top: 5px; }
+
+/* Dialogo de alta */
+dialog {
+  background: var(--panel); color: var(--text); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 0; width: 380px;
+}
+dialog::backdrop { background: rgba(0,0,0,.6); }
+dialog .dlg-body { padding: 18px; display: flex; flex-direction: column; gap: 11px; }
+dialog h2 { margin: 0 0 3px; font-size: 15px; }
+label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
+label input { color: var(--text); }
+</style>
+</head>
+<body>
+
+<header>
+  <span class="dot on" id="hubDot"></span>
+  <h1>Puente</h1>
+  <span class="sub" id="hubInfo">conectando…</span>
+  <span class="spacer"></span>
+  <span class="sub" id="tick"></span>
+  <button class="btn" id="btnRefresh">Refrescar</button>
+  <button class="btn primary" id="btnAdd">+ Instancia</button>
+</header>
+
+<main>
+  <div class="grid" id="grid"></div>
+  <p class="empty-note" id="noInstances" style="display:none">
+    No hay instancias. Pulsa «+ Instancia» para añadir una.
+  </p>
+</main>
+
+<dialog id="dlg">
+  <div class="dlg-body">
+    <h2>Nueva instancia</h2>
+    <label>Nombre<input id="fName" placeholder="Instancia 2" value="Instancia"></label>
+    <label>Puerto del puente<input id="fPort" class="n" type="number" value="25581" min="1" max="65535"></label>
+    <label>Host<input id="fHost" value="127.0.0.1"></label>
+    <label>Token (opcional)<input id="fToken" placeholder="solo si requireToken=true"></label>
+    <p class="hint">Solo se admiten hosts de loopback.</p>
+    <div class="row" style="justify-content:flex-end">
+      <button class="btn" id="dlgCancel">Cancelar</button>
+      <button class="btn primary" id="dlgSave">Añadir</button>
+    </div>
+  </div>
+</dialog>
+
+<script>
+"use strict";
+
+// --- Utilidades ------------------------------------------------------------
+
+/** Escapa texto antes de meterlo en el DOM. */
+function esc(s) {
+  return String(s ?? "").replace(/[&<>"']/g, c => (
+    { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]
+  ));
+}
+
+async function api(path, options = {}) {
+  const res = await fetch(path, {
+    ...options,
+    headers: options.body ? { "Content-Type": "application/json" } : {},
+  });
+  const text = await res.text();
+  let body = null;
+  try { body = text ? JSON.parse(text) : null; } catch { body = null; }
+  return { status: res.status, body };
+}
+
+const el = (id) => document.getElementById(id);
+
+// --- Estado ----------------------------------------------------------------
+
+const state = {
+  instances: [],   // { ...config, online, status, error }
+  logs: {},        // id -> ultimo tramo de chat ya mostrado
+  invOpen: {},     // id -> bool
+  expanded: {},    // id -> bool
+  chat: {},        // id -> [{text, kind}]
+  busy: {},        // id -> bool
+};
+
+function log(id, text, kind = "") {
+  if (!state.chat[id]) state.chat[id] = [];
+  const buf = state.chat[id];
+  buf.push({ text, kind });
+  if (buf.length > 120) buf.splice(0, buf.length - 120);
+}
+
+/** Pide una accion a una instancia y anota el resultado en su log. */
+async function act(id, path, body, label) {
+  const inst = state.instances.find(i => i.id === id);
+  if (inst && state.busy[id]) return;
+  state.busy[id] = true;
+  try {
+    const res = await api(`/api/instances/${id}/${path}`, {
+      method: body === undefined ? "GET" : "POST",
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    if (res.status >= 200 && res.status < 300) {
+      log(id, `✓ ${label}`, "ok");
+    } else {
+      const e = res.body && res.body.error;
+      log(id, `✗ ${label}: ${e ? e.code + " — " + e.message : "HTTP " + res.status}`, "err");
+    }
+  } catch (err) {
+    log(id, `✗ ${label}: ${err.message}`, "err");
+  } finally {
+    state.busy[id] = false;
+    refresh();
+  }
+}
+
+// --- Render ----------------------------------------------------------------
+
+function statusPill(inst) {
+  if (!inst.online) return `<span class="pill bad">apagada</span>`;
+  const s = inst.status || {};
+  if (!s.inWorld) return `<span class="pill warn">en menú</span>`;
+  if (s.dead) return `<span class="pill bad">muerta</span>`;
+  return `<span class="pill ok">en juego</span>`;
+}
+
+function stat(k, v) {
+  const empty = v === null || v === undefined || v === "";
+  return `<div class="stat"><div class="k">${esc(k)}</div>
+    <div class="v${empty ? " empty" : ""}">${empty ? "—" : esc(v)}</div></div>`;
+}
+
+function slotHtml(slot, selected) {
+  if (!slot || !slot.id) {
+    return `<div class="slot" title="vacío"></div>`;
+  }
+  // El nombre traducido se acorta: dentro de un cuadrado no cabe entero.
+  const words = String(slot.name || slot.id).split(" ");
+  const short = words.length > 2 ? words.slice(0, 2).join(" ") : (slot.name || slot.id);
+  const dmg = (slot.maxDamage && slot.maxDamage > 0)
+    ? `<div class="n">${slot.damage}/${slot.maxDamage}</div>` : "";
+  return `<div class="slot filled${selected ? " sel" : ""}"
+    title="${esc(slot.name || slot.id)} ×${slot.count}\n${esc(slot.id)}">${esc(short)}${dmg}</div>`;
+}
+
+function inventoryHtml(id) {
+  const inst = state.instances.find(i => i.id === id);
+  const inv = inst && inst.inv;
+  if (!inv) return `<p class="empty-note">No hay inventario.</p>`;
+
+  const hotbar = inv.hotbar.map(s => slotHtml(s, s.index === inv.selectedSlot)).join("");
+  const main = inv.main.map(s => slotHtml(s)).join("");
+  const order = ["head", "chest", "legs", "feet"];
+  const armor = order.map(k => slotHtml(inv.armor && inv.armor[k])).join("");
+  const off = slotHtml(inv.offhand);
+
+  return `<div class="inv">${hotbar}</div>
+    <div class="inv" style="margin-top:4px">${main}</div>
+    <div class="armor">${armor}${off}</div>
+    <p class="hint">${inv.filled} huecos ocupados · ranura ${inv.selectedSlot + 1}</p>`;
+}
+
+function chatHtml(id) {
+  const buf = state.chat[id] || [];
+  if (!buf.length) return `<p class="empty-note">Sin actividad todavía.</p>`;
+  return buf.map(l =>
+    `<div class="${l.kind}">${esc(l.text)}</div>`
+  ).join("");
+}
+
+function cardHtml(inst) {
+  const s = inst.status || {};
+  const open = !!state.expanded[inst.id];
+  const invOpen = !!state.invOpen[inst.id];
+  const busy = !!state.busy[inst.id];
+  const dis = busy ? "disabled" : "";
+
+  return `<div class="card" data-id="${esc(inst.id)}">
+    <div class="head">
+      <span class="dot ${inst.online ? "on" : "off"}"></span>
+      <span class="name">${esc(inst.name)}</span>
+      <span class="port">:${inst.port}</span>
+      <span class="spacer"></span>
+      ${statusPill(inst)}
+      <button class="btn" data-act="toggle" data-id="${esc(inst.id)}">${open ? "Ocultar" : "Detalle"}</button>
+    </div>
+
+    <div class="body">
+      <div class="stats">
+        ${stat("Jugador", s.playerName)}
+        ${stat("Mundo", s.worldName || s.serverName)}
+        ${stat("Dimensión", s.dimension)}
+        ${stat("FPS", s.fps)}
+        ${stat("Jugadores", s.playerCount ? `${s.playerCount}${s.maxPlayers ? " / " + s.maxPlayers : ""}` : null)}
+        ${stat("Pantalla", s.screen)}
+      </div>
+
+      ${inst.error ? `<p class="empty-note" style="color:var(--bad)">${esc(inst.error)}</p>` : ""}
+
+      <div class="row">
+        <button class="btn primary" data-act="connect" data-id="${esc(inst.id)}" ${dis}>Conectar</button>
+        <button class="btn" data-act="disconnect" data-id="${esc(inst.id)}" ${dis}>Desconectar</button>
+        <button class="btn" data-act="respawn" data-id="${esc(inst.id)}" ${dis || s.dead ? "" : "disabled"}
+          title="${s.dead ? "" : "solo si el personaje está muerto"}">Reaparecer</button>
+        <button class="btn" data-act="status" data-id="${esc(inst.id)}" ${dis}>Actualizar</button>
+        <button class="btn" data-act="profile" data-id="${esc(inst.id)}" ${dis}>Identidad</button>
+      </div>
+
+      <div class="sect">
+        <h3>Chat y comandos</h3>
+        <div class="row">
+          <input class="grow" data-input="chat" data-id="${esc(inst.id)}" placeholder="Mensaje para el chat">
+          <button class="btn" data-act="chat" data-id="${esc(inst.id)}" ${dis}>Enviar</button>
+        </div>
+        <div class="row">
+          <input class="grow" data-input="cmd" data-id="${esc(inst.id)}" placeholder="Comando, sin / (p. ej. list)">
+          <button class="btn" data-act="cmd" data-id="${esc(inst.id)}" ${dis}>Ejecutar</button>
+        </div>
+      </div>
+
+      <div class="sect">
+        <h3>Baritone</h3>
+        <div class="row">
+          <input data-input="block" data-id="${esc(inst.id)}" placeholder="diamond_ore" value="diamond_ore">
+          <input data-input="amount" data-id="${esc(inst.id)}" class="n" type="number" value="32" min="1">
+          <button class="btn" data-act="mine" data-id="${esc(inst.id)}" ${dis}>Minar</button>
+          <button class="btn" data-act="bstop" data-id="${esc(inst.id)}" ${dis}>Parar</button>
+          <button class="btn" data-act="binfo" data-id="${esc(inst.id)}" ${dis}>Estado</button>
+        </div>
+        <div class="row">
+          <input data-input="follow" data-id="${esc(inst.id)}" placeholder="Seguir a un jugador">
+          <button class="btn" data-act="follow" data-id="${esc(inst.id)}" ${dis}>Seguir</button>
+        </div>
+      </div>
+
+      <div class="sect">
+        <div class="row" style="justify-content:space-between">
+          <h3 style="margin:0">Inventario</h3>
+          <button class="btn" data-act="inv" data-id="${esc(inst.id)}" ${dis}>
+            ${invOpen ? "Ocultar" : "Ver"}</button>
+        </div>
+        <div style="margin-top:9px" class="${invOpen ? "" : "hidden"}" data-inv="${esc(inst.id)}">
+          ${invOpen ? inventoryHtml(inst.id) : ""}
+        </div>
+      </div>
+
+      <div class="sect ${open ? "" : "hidden"}">
+        <h3>Registro</h3>
+        <div class="log" data-log="${esc(inst.id)}">${chatHtml(inst.id)}</div>
+      </div>
+
+      <div class="row" style="justify-content:flex-end">
+        <button class="btn danger" data-act="remove" data-id="${esc(inst.id)}" ${dis}>Quitar instancia</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+function render() {
+  el("grid").innerHTML = state.instances.map(cardHtml).join("");
+  el("noInstances").style.display = state.instances.length ? "none" : "block";
+  el("hubInfo").textContent =
+    `${state.instances.length} instancia(s) · ${state.instances.filter(i => i.online).length} en línea`;
+}
+
+// --- Datos -----------------------------------------------------------------
+
+/** Sondea el estado de cada instancia y recoge el chat nuevo. */
+async function poll() {
+  const res = await api("/api/instances");
+  if (res.status !== 200 || !res.body || !res.body.data) {
+    el("hubDot").className = "dot off";
+    el("hubInfo").textContent = "sin conexión con el hub";
+    return;
+  }
+  el("hubDot").className = "dot on";
+
+  const previous = new Map(state.instances.map(i => [i.id, i]));
+  state.instances = res.body.data.instances;
+
+  for (const inst of state.instances) {
+    // Solo se pide el chat de las que están vivas y ya se habían expandido,
+    // para no gastar peticiones en instancias que nadie mira.
+    if (inst.online && state.expanded[inst.id]) {
+      const c = await api(`/api/instances/${inst.id}/chat?limit=25`);
+      if (c.status === 200 && c.body && c.body.data && c.body.data.messages) {
+        const msgs = c.body.data.messages;
+        const seen = state.logs[inst.id] || 0;
+        if (msgs.length && seen !== msgs.length) {
+          for (const m of msgs.slice(-12)) {
+            log(inst.id, m.text, m.kind === "system" ? "sys" : "");
+          }
+          state.logs[inst.id] = msgs.length;
+        }
+      }
+    }
+    if (previous.has(inst.id) && !inst.online && previous.get(inst.id).online) {
+      log(inst.id, "· la instancia se ha apagado", "err");
+    }
+    if (!previous.has(inst.id)) log(inst.id, "· instancia añadida");
+  }
+
+  // El inventario se pide solo si la casilla está abierta.
+  for (const inst of state.instances) {
+    if (state.invOpen[inst.id] && inst.online) {
+      const inv = await api(`/api/instances/${inst.id}/inventory`);
+      if (inv.status === 200 && inv.body && inv.body.data) inst.inv = inv.body.data;
+    }
+  }
+
+  render();
+  el("tick").textContent = new Date().toLocaleTimeString("es-ES");
+}
+
+// --- Eventos ---------------------------------------------------------------
+
+const ACTIONS = {
+  toggle: (id) => { state.expanded[id] = !state.expanded[id]; render(); },
+  inv: (id) => { state.invOpen[id] = !state.invOpen[id]; render(); poll(); },
+  connect: (id) => promptConnect(id),
+  disconnect: (id) => act(id, "disconnect", {}, "desconectar"),
+  respawn: (id) => act(id, "respawn", {}, "reaparecer"),
+  status: (id) => act(id, "status", undefined, "leer estado"),
+  profile: (id) => changeIdentity(id),
+  chat: (id) => withInput(id, "chat", v => act(id, "chat", { message: v }, `chat: ${v}`)),
+  cmd: (id) => withInput(id, "cmd", v => act(id, "command", { command: v }, `comando: /${v}`)),
+  mine: (id) => {
+    const block = readInput(id, "block") || "diamond_ore";
+    const amount = parseInt(readInput(id, "amount") || "32", 10);
+    act(id, "baritone/mine", { block, amount }, `minar ${block} ×${amount}`);
+  },
+  bstop: (id) => act(id, "baritone/stop", {}, "parar Baritone"),
+  binfo: (id) => baritoneInfo(id),
+  follow: (id) => withInput(id, "follow", v => act(id, "baritone/follow", { target: v }, `seguir a ${v}`)),
+  remove: (id) => removeInstance(id),
+};
+
+function readInput(id, name) {
+  return el(`grid`).querySelector(`[data-input="${name}"][data-id="${id}"]`)?.value.trim() ?? "";
+}
+
+function withInput(id, name, fn) {
+  const v = readInput(id, name);
+  if (!v) return;
+  fn(v);
+}
+
+function promptConnect(id) {
+  const inst = state.instances.find(i => i.id === id);
+  const host = window.prompt("Servidor al que conectar", "localhost");
+  if (!host) return;
+  const portInput = window.prompt("Puerto", "25565");
+  if (!portInput) return;
+  const port = parseInt(portInput, 10);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    log(id, "✗ puerto inválido", "err");
+    render();
+    return;
+  }
+  act(id, "connect", { host, port }, `conectar a ${host}:${port}`);
+}
+
+async function changeIdentity(id) {
+  const res = await api(`/api/instances/${id}/profile`);
+  const cur = res.status === 200 && res.body.data ? res.body.data.name : "?";
+  const name = window.prompt(`Nombre actual: ${cur}\nNuevo nombre (1-16, letras, dígitos y guion bajo)`, cur);
+  if (!name) return;
+  act(id, "profile", { name }, `identidad: ${name}`);
+}
+
+async function baritoneInfo(id) {
+  for (const what of ["version", "proc", "eta", "paused"]) {
+    const res = await api(`/api/instances/${id}/baritone/${what}`);
+    const d = res.status === 200 && res.body.data ? JSON.stringify(res.body.data) : "—";
+    log(id, `${what}: ${d}`);
+  }
+  render();
+}
+
+async function removeInstance(id) {
+  const inst = state.instances.find(i => i.id === id);
+  if (!window.confirm(`¿Quitar «${inst.name}» del panel? (no cierra Minecraft)`)) return;
+  await api(`/api/instances/${id}`, { method: "DELETE" });
+  poll();
+}
+
+document.addEventListener("click", (ev) => {
+  const btn = ev.target.closest("[data-act]");
+  if (!btn) return;
+  const fn = ACTIONS[btn.dataset.act];
+  if (fn) fn(btn.dataset.id);
+});
+
+document.addEventListener("keydown", (ev) => {
+  if (ev.key !== "Enter") return;
+  const input = ev.target.closest("[data-input]");
+  if (!input) return;
+  const map = { chat: "chat", cmd: "cmd" };
+  const act_ = map[input.dataset.input];
+  if (act_ && ACTIONS[act_]) ACTIONS[act_](input.dataset.id);
+});
+
+el("btnRefresh").addEventListener("click", poll);
+el("btnAdd").addEventListener("click", () => el("dlg").showModal());
+el("dlgCancel").addEventListener("click", () => el("dlg").close());
+el("dlgSave").addEventListener("click", async () => {
+  const res = await api("/api/instances", {
+    method: "POST",
+    body: JSON.stringify({
+      name: el("fName").value,
+      host: el("fHost").value,
+      port: parseInt(el("fPort").value, 10),
+      token: el("fToken").value,
+    }),
+  });
+  if (res.status === 200) {
+    el("dlg").close();
+    poll();
+  } else {
+    const e = res.body && res.body.error;
+    window.alert(e ? `${e.code}: ${e.message}` : `HTTP ${res.status}`);
+  }
+});
+
+// El log se autodesplaza al final para que se vea lo ultimo.
+function autoscroll() {
+  for (const box of document.querySelectorAll("[data-log]")) box.scrollTop = box.scrollHeight;
+}
+
+poll();
+setInterval(poll, 2000);
+setInterval(autoscroll, 1000);
+</script>
+</body>
+</html>

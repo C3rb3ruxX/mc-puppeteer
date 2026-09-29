@@ -74,6 +74,7 @@ esperas, un `null` en `screen` es normal, no un error.
 | `GET` | `/health` | Vivo y uptime. **Sin token.** |
 | `GET` | `/status` | Estado completo del cliente, mundo, FPS, pantalla. |
 | `GET` | `/players` | Jugadores del tab list con su latencia. |
+| `GET` | `/inventory` | Inventario: barra, mochila, armadura y mano secundaria. |
 | `GET` | `/chat?limit=N` | Lee el chat pendiente y **lo consume**. |
 | `GET` | `/chat/history?limit=N` | Copia del historial **sin consumir**. |
 | `POST` | `/chat` | Envia un mensaje de chat. |
@@ -361,6 +362,55 @@ while ($true) {
 Repetir el respawn sobre un jugador vivo **no** reenvia nada: se rechaza antes
 de tocar la red. Es `POST` y no `GET` porque reaparecer cambia el estado de la
 sesion; un refresco de pagina o un prefetch no deberian poder dispararlo.
+
+### `GET /inventory`
+
+Inventario completo del jugador: barra rapida, mochila, armadura y mano secundaria.
+
+```powershell
+curl.exe -s "$BASE/inventory" -H $AUTH
+```
+
+```json
+{
+  "selectedSlot": 0,
+  "hotbar": [
+    { "index": 0, "id": "minecraft:diamond_pickaxe", "count": 1,
+      "name": "Pico de diamante", "damage": 12, "maxDamage": 1561 },
+    { "index": 1, "id": null, "count": 0,
+      "name": null, "damage": null, "maxDamage": null }
+  ],
+  "main": [ "...27 huecos..." ],
+  "armor": {
+    "head":  { "index": 5, "id": "minecraft:iron_helmet", "...": "..." },
+    "chest": { "index": 6, "id": "minecraft:iron_chestplate", "...": "..." },
+    "legs":  { "index": 7, "id": null, "...": "..." },
+    "feet":  { "index": 8, "id": "minecraft:iron_boots", "...": "..." }
+  },
+  "offhand": { "index": -1, "id": "minecraft:shield", "count": 1, "...": "..." },
+  "filled": 39
+}
+```
+
+Tres decisiones que hacen que esto sea utilizable por un bot:
+
+- **`id` es la ruta del registro** (`minecraft:diamond_sword`), no el nombre
+  traducido. `name` depende del idioma del juego, asi que no sirve para
+  automatizar; `id` si.
+- **Los huecos vacios se conservan** con `id: null` y `count: 0`. No se omiten,
+  para que `hotbar[0]` sea siempre el slot 0. Omitirlos seria el error
+  clasico: una lista compacta hace que el indice 1 sea en realidad el slot 2.
+- **La armadura se indexa por pieza** (`head`, `chest`, `legs`, `feet`) y no por
+  posicion. En 26.3 no hay accessor publico al NonNullList de armadura de
+  `LivingEntity` y la interfaz `Equipment` ya no existe, asi que se lee de
+  `Player.inventoryMenu` (lo mismo que la GUI) y el nombre se saca del propio
+  `ArmorSlot` por reflexion de un campo de tipo `EquipmentSlot`. No se supone
+  el orden de vanilla.
+
+`damage` y `maxDamage` solo se rellenan en objetos que se estropean; en el resto
+van a `null` en vez de a `0`, para no sugerir que existe un desgaste.
+
+Sin mundo responde `409 not_connected`. Es `GET` de solo lectura; `POST` da `405`.
 
 ### `GET /debug`
 

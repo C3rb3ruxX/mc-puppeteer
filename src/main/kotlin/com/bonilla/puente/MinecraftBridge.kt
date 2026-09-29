@@ -1,6 +1,7 @@
 package com.bonilla.puente
 
 import com.google.gson.JsonArray
+import com.google.gson.JsonNull
 import com.google.gson.JsonObject
 
 /**
@@ -48,6 +49,15 @@ interface MinecraftBridge {
 
 	/** Jugadores actualmente en el tab list. */
 	fun onlinePlayers(): List<RemotePlayerInfo>
+
+	/**
+	 * Instantanea del inventario del jugador: barra rapida, mochila, armadura y
+	 * mano secundaria.
+	 *
+	 * Falla con `409 not_connected` si no hay mundo, porque sin `LocalPlayer` no
+	 * hay inventario que leer.
+	 */
+	fun inventory(): PlayerInventory
 
 	/**
 	 * Identidad con la que el cliente se presenta al conectar.
@@ -129,6 +139,73 @@ data class ClientStatus(
 		addProperty("windowActive", windowActive)
 		addProperty("dead", dead)
 	}
+}
+
+/**
+ * Un hueco del inventario.
+ *
+ * Los huecos vacios **se conservan** con `id = null` y `count = 0` en lugar de
+ * omitirse. Asi `hotbar[0]` es siempre el slot 0 y un bot puede indexar por
+ * posicion sin tener que saltar los huecos, que es el error clasico al
+ * depender de una lista compacta.
+ *
+ * @param id ruta del item en el registro, p. ej. `minecraft:diamond_sword`.
+ *   Es el identificador estable; [name] es texto traducido y puede cambiar con
+ *   el idioma, asi que no sirve para automatizar.
+ * @param damage / [maxDamage] solo se rellenan en objetos con durabilidad; en
+ *   el resto van a `null` para no sugerir que existe un desgaste.
+ */
+data class ItemSlot(
+	val index: Int,
+	val id: String?,
+	val count: Int,
+	val name: String?,
+	val damage: Int?,
+	val maxDamage: Int?,
+) {
+	val isEmpty: Boolean get() = id == null
+
+	fun toJson(): JsonObject = JsonObject().apply {
+		addProperty("index", index)
+		addProperty("id", id)
+		addProperty("count", count)
+		addProperty("name", name)
+		addProperty("damage", damage)
+		addProperty("maxDamage", maxDamage)
+	}
+}
+
+/**
+ * Inventario completo del jugador.
+ *
+ * @param armor indexado por el nombre de la pieza (`head`, `chest`, `legs`,
+ *   `feet`). Los nombres salen de `EquipmentSlot`, no de suponer el orden.
+ */
+data class PlayerInventory(
+	val selectedSlot: Int,
+	val hotbar: List<ItemSlot>,
+	val main: List<ItemSlot>,
+	val armor: Map<String, ItemSlot>,
+	val offhand: ItemSlot?,
+) {
+	/** Cuantos huecos tienen algo. Un solo numero para pintar de un vistazo. */
+	val filled: Int
+		get() = hotbar.count { !it.isEmpty } +
+			main.count { !it.isEmpty } +
+			armor.values.count { !it.isEmpty } +
+			if (offhand?.isEmpty == false) 1 else 0
+
+	fun toJson(): JsonObject = JsonObject().apply {
+		addProperty("selectedSlot", selectedSlot)
+		add("hotbar", slotsToJson(hotbar))
+		add("main", slotsToJson(main))
+		add("armor", JsonObject().apply { armor.forEach { (piece, slot) -> add(piece, slot.toJson()) } })
+		if (offhand == null) add("offhand", JsonNull.INSTANCE) else add("offhand", offhand.toJson())
+		addProperty("filled", filled)
+	}
+
+	private fun slotsToJson(slots: List<ItemSlot>): JsonArray =
+		JsonArray().also { array -> slots.forEach { array.add(it.toJson()) } }
 }
 
 data class RemotePlayerInfo(

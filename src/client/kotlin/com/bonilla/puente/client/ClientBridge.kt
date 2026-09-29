@@ -1,8 +1,10 @@
 package com.bonilla.puente.client
 
 import com.bonilla.puente.ClientStatus
+import com.bonilla.puente.ItemSlot
 import com.bonilla.puente.MinecraftBridge
 import com.bonilla.puente.PlayerIdentity
+import com.bonilla.puente.PlayerInventory
 import com.bonilla.puente.PuenteException
 import com.bonilla.puente.RemotePlayerInfo
 import net.minecraft.SharedConstants
@@ -13,7 +15,13 @@ import net.minecraft.client.gui.screens.TitleScreen
 import net.minecraft.client.multiplayer.ServerData
 import net.minecraft.client.multiplayer.resolver.ServerAddress
 import net.minecraft.core.UUIDUtil
+import net.minecraft.core.registries.BuiltInRegistries
 import net.minecraft.network.chat.Component
+import net.minecraft.world.entity.EquipmentSlot
+import net.minecraft.world.inventory.ArmorSlot
+import net.minecraft.world.inventory.InventoryMenu
+import net.minecraft.world.inventory.Slot
+import net.minecraft.world.item.ItemStack
 import org.slf4j.Logger
 import java.util.Optional
 
@@ -145,6 +153,91 @@ class ClientBridge(
 		}
 	}
 
+	override fun inventory(): PlayerInventory {
+		val player = Minecraft.getInstance().player
+			?: throw PuenteException(409, "not_connected", "El cliente no esta en ningun mundo")
+
+		// La mochila y la barra rapida son los 36 primeros slots de `Inventory`:
+		// 0-8 barra rapida, 9-35 mochila. Se leen con `getItem(i)` para no
+		// depender de como este partido el NonNullList por dentro.
+		val inv = player.inventory
+		val hotbar = (0 until HOTBAR_SIZE).map { inv.getItem(it).toSlot(it) }
+		val main = (HOTBAR_SIZE until inv.containerSize).map { inv.getItem(it).toSlot(it) }
+
+		return PlayerInventory(
+			selectedSlot = inv.selectedSlot,
+			hotbar = hotbar,
+			main = main,
+			armor = armorSlots(player),
+			// La mano secundaria se lee del jugador, no del menu: es un metodo
+			// publico y asi no hay que depender de la posicion del slot.
+			offhand = player.getOffhandItem().toSlot(OFFHAND_INDEX),
+		)
+	}
+
+	/**
+	 * Armadura indexada por pieza.
+	 *
+	 * En 26.3 no hay accessor publico al NonNullList de armadura de
+	 * `LivingEntity`, y la interfaz `Equipment` ya no existe. La via publica que
+	 * si queda es `Player.inventoryMenu`, que es lo mismo que lee la GUI, asi que
+	 * no puede desincronizarse de lo que ve el jugador.
+	 *
+	 * El **nombre** de cada pieza se saca del propio `ArmorSlot` (que guarda un
+	 * `EquipmentSlot`) en vez de suponer el orden: el constructor recibe
+	 * `HEAD`/`CHEST`/`LEGS`/`FEET` y asi el mapa sale bien aunque vanilla reordene
+	 * los slots. El campo es privado, asi que se lee por tipo como en
+	 * [userField] para no depender del nombre ofuscado.
+	 */
+	private fun armorSlots(player: net.minecraft.client.player.LocalPlayer): Map<String, ItemSlot> {
+		val menu = player.inventoryMenu
+		val pieces = LinkedHashMap<String, ItemSlot>()
+
+		for (i in InventoryMenu.ARMOR_SLOT_START until InventoryMenu.ARMOR_SLOT_END) {
+			// `NonNullList.get` no devuelve null, asi que el indice se presume
+			// dentro de rango: lo garantiza el propio menu de vanilla.
+			val slot = menu.slots.get(i)
+			val piece = equipmentSlotName(slot) ?: "slot$i"
+			pieces[piece] = slot.item.toSlot(i)
+		}
+
+		return pieces
+	}
+
+	/** `true`/`false`/`null` segun sea armadura, otra cosa, o no se pudo leer. */
+	private fun equipmentSlotName(slot: Slot): String? {
+		if (slot !is ArmorSlot) return null
+		val field = armorSlotField ?: return null
+		return (field.get(slot) as? EquipmentSlot)?.name?.lowercase()
+	}
+
+	/**
+	 * Convierte un stack en un hueco del JSON.
+	 *
+	 * El identificador sale de la clave del registro (`minecraft:diamond_sword`),
+	 * no del nombre traducido: el nombre depende del idioma del juego y no sirve
+	 * para automatizar.
+	 */
+	private fun ItemStack?.toSlot(index: Int): ItemSlot {
+		if (this == null || isEmpty) {
+			return ItemSlot(index, id = null, count = 0, name = null, damage = null, maxDamage = null)
+		}
+
+		// `getMaxDamage()` es 0 en los objetos que no se estropean; solo tiene
+		// sentido leer el desgaste en los que si.
+		val maxDamage = getMaxDamage()
+		return ItemSlot(
+			index = index,
+			// Se pide la clave al registro y no `builtInRegistryHolder()`, que
+			// esta obsoleto. `DefaultedRegistry.getKey` es la via vigente.
+			id = BuiltInRegistries.ITEM.getKey(getItem()).toString(),
+			count = count,
+			name = getHoverName().string,
+			damage = if (maxDamage > 0) getDamageValue() else null,
+			maxDamage = if (maxDamage > 0) maxDamage else null,
+		)
+	}
+
 	override fun playerIdentity(): PlayerIdentity {
 		val user = Minecraft.getInstance().getUser()
 		return PlayerIdentity(name = user.getName(), uuid = user.getProfileId().toString())
@@ -244,9 +337,35 @@ class ClientBridge(
 		/** Reglas de nombre de jugador de Minecraft: `SharedConstants` no expone el patron. */
 		private val NAME_PATTERN = Regex("^[A-Za-z0-9_]{1,16}$")
 
+		/** Slots 0-8 de `Inventory`: la barra rapida. */
+		private const val HOTBAR_SIZE = 9
+
+		/**
+		 * Indice que se usa para el `index` de la mano secundaria.
+		 *
+		 * No es el del slot real (depende del menu), sino uno estable y
+		 * negativo para que un bot distinga la mano secundaria de la mochila sin
+		 * depender de la posicion.
+		 */
+		private const val OFFHAND_INDEX = -1
+
 		/** Resuelto una sola vez: la version de MC no cambia durante la sesion. */
 		val minecraftVersion: String by lazy {
 			runCatching { SharedConstants.getCurrentVersion().name() }.getOrDefault("desconocida")
+		}
+
+		/**
+		 * Campo privado de [ArmorSlot] que guarda la pieza, localizado por tipo.
+		 *
+		 * `EquipmentSlot` es unico en `ArmorSlot`, asi que el desempate es seguro.
+		 * Si no se encuentra, la armadura se devuelve indexada por `slotN` en vez
+		 * de fallar: perder el nombre de la pieza es molesto, pero no merecer la
+		 * pena que `/inventory` deje de responder.
+		 */
+		private val armorSlotField: java.lang.reflect.Field? by lazy {
+			ArmorSlot::class.java.declaredFields
+				.firstOrNull { it.type == EquipmentSlot::class.java }
+				?.apply { isAccessible = true }
 		}
 	}
 }
