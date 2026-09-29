@@ -20,7 +20,7 @@ red de pruebas) que:
 1. construye un `MinecraftBridge` **falso** que solo registra en que hilo se
    le llamo,
 2. levanta un `PuenteHttpServer` real en `127.0.0.1:25599`,
-3. le manda 89 peticiones con `java.net.http.HttpClient`,
+3. le manda 156 peticiones con `java.net.http.HttpClient`,
 4. comprueba estado HTTP, codigo de error y contenido,
 5. comprueba que el buffer acotado se comporta,
 6. comprueba que los comandos de Baritone se traducen y salen por chat,
@@ -48,7 +48,7 @@ $cp = @(
 ) + $slf4j
 $full = ($cp -join ';')
 
-& "C:\Program Files\Java\jdk-25.0.2\bin\javac.exe" -nowarn -cp $full -d "$tmp\out" agents\tests\PuenteSmokeTest.java
+& "C:\Program Files\Java\jdk-25.0.2\bin\javac.exe" -nowarn -cp $full -d "$tmp\out" agents\tests\PuenteSmokeTest.java agents\tests\BaritoneCommandSignatures.java
 & "C:\Program Files\Java\jdk-25.0.2\bin\java.exe"  -cp "$tmp\out;$full" PuenteSmokeTest
 ```
 
@@ -64,7 +64,7 @@ coincide con el del fichero (`PuenteSmokeTest`), que es lo que exige Java
 para una clase publica; el comando de arriba invoca ese nombre.
 
 Hubo antes una copia en `%TEMP%\opencode\SmokeTest.java` con el nombre corto
-`SmokeTest`. Esa variante daba 89/89 igual, pero rompia el comando documentado
+`SmokeTest`. Esa variante daba 156/156 igual, pero rompia el comando documentado
 en cuanto se copiaba al repositorio, porque `javac` no acepta una clase
 publica cuyo nombre no coincida con el del `.java`. Se renombro al integrarla.
 
@@ -135,26 +135,48 @@ publica cuyo nombre no coincida con el del `.java`. Se renombro al integrarla.
 - `drain` de mas de lo disponible devuelve lo que hay.
 - `drain` sobre buffer vacio devuelve lista vacia.
 
-### Baritone (46)
+### Baritone (76)
 Baritone se controla por chat con prefijo `#`, no por API HTTP. Lo que se
 comprueba es que el bridge lo envie por `sendChat` y **nunca** por
 `sendCommand` (que va al servidor y lo rechaza).
 
-- El indice `GET /baritone` responde `200`.
-- Consultas: `version`, `proc`, `eta`, `modified`, `wp`, `gc` translates a su
-  comando `#` correspondiente.
-- Consultas con parametro: `help?q=mine` -> `#help mine`,
-  `find?block=diamond_ore` -> `#find diamond_ore`.
-- Traduccion de 19 acciones POST (goto en sus 4 formas, goal, mine, build,
-  follow, tunnel, cleararea, explore, axis, stop, surface, cancel, repack...).
-- `POST /baritone/stop?force` -> `#forcecancel`.
-- Rechazos: coordenadas parciales (`{"x":1,"y":2}`) -> `400 invalid_goal`,
-  `axis` fuera de rango -> `400`, ruta no registrada -> `404`,
-  `POST` sobre una ruta que solo admite `GET` -> `405`.
+- El indice `GET /baritone` responde `200` y expone los alias.
+- Consultas: `version`, `proc`, `eta`, `modified`, `paused`, `wp`, `gc` se
+  traducen a su comando. `wp` emite `#waypoints`, no `#wp`.
+- Consultas con parametro: `help?q=mine`, `find?block=diamond_ore`.
+- Traduccion de 21 acciones POST, con las 4 formas de `goto`.
+- `cleararea` se traduce a `#sel cleararea N`, que es como lo registra Baritone
+  (es subcomando de `sel`, no un comando propio).
+- `stop` se traduce a `#cancel`; `stop?force` a `#forcecancel`, que es distinto.
+- `top` se traduce a `#surface`; `home` y `sethome` a sus nombres canonicos.
+- Rechazos: coordenadas parciales -> `invalid_goal`, `axis` sin `y` ->
+  `missing_field`, `axis` fuera de rango -> `invalid_field`, `thisway` sin
+  distancia -> `missing_field`, `mine` sin bloque -> `missing_field`,
+  `schematica` -> `404` (esta comentado en Baritone), ruta inexistente -> `404`,
+  metodo incorrecto -> `405`.
 - Inyeccion bloqueada en 4 casos (`"diamond; op Alex"`, `"Alex\n#op"`,
   `"../../etc/passwd"`, `"base.schematic && rm -rf /"`).
 - Los N comandos salieron por `sendChat`, ninguno por `sendCommand`.
 - Todos los mensajes llevan prefijo `#`.
+
+#### Sincronizacion con el codigo de Baritone
+
+`BaritoneCommandSignatures.java` guarda los nombres y alias reales, extraidos de
+las firmas del source. La prueba los contrasta con `BaritoneTranslator.COMMANDS`:
+
+- El registro cubre todos los comandos, sin faltantes.
+- El registro no inventa comandos inexistentes.
+- `schematica` y `cleararea` no resuelven a nada.
+- 15 alias resuelven al nombre canonico correcto (`stop`->`cancel`, `top`->
+  `surface`, `wp`->`waypoints`, `p`->`pause`, `s`->`sel`...).
+- Los 13 comandos que exigen argumentos no se pueden enviar vacios.
+- Los que no los exigen, si.
+- Clasificacion: `readOnly`, `maintenance` y `noArg` aceptan lo suyo y
+  rechazan lo demas con el codigo correcto.
+
+Esta comprobacion se valido a proposito: renombrando `elytra` a algo
+inexistente, la prueba falla en ambos sentidos (`faltan: [elytra]`,
+`sobran: [elytraFALSO]`). Un test que siempre pasa no serviria de nada.
 
 ### Limite de tasa (1)
 - Tras superar 120 peticiones en la ventana, aparecen `429`.
@@ -172,6 +194,8 @@ comprueba es que el bridge lo envie por `sendChat` y **nunca** por
 | Hueco | Por que |
 |---|---|
 | `ClientBridge` (envio real de chat/comando/conexion) | Requiere un cliente de Minecraft conectado a un servidor. Solo se valida en compilacion y en juego. |
+| Que Baritone este realmente escuchando | La prueba comprueba que se llama a `sendChat`, no que Baritone intercepte el mensaje. Eso solo se ve con el mod instalado. |
+| Que los comandos generados los entienda Baritone | Se contratan los **nombres** contra el source, pero no la semantica de cada argumento. Un `goto x y z` mal construido pasaria el test. |
 | `ChatCapture` (eventos de Fabric) | Igual: los eventos solo se disparan con un mundo real cargado. |
 | Comportamiento con el juego en pausa, sin conexion, o en medio de una transicion de mundo | Es el escenario mas delicado de todos (ver abajo). |
 | Medicion de impacto en FPS | No medido. Ver `02-implementacion.md` §5. |

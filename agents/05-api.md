@@ -82,11 +82,11 @@ esperas, un `null` en `screen` es normal, no un error.
 | `POST` | `/disconnect` | Sale al titulo. |
 | `GET` | `/debug` | Estado interno del buffer de chat. |
 | `GET` | `/baritone` | Indice de comandos de Baritone. |
-| `GET` | `/baritone/version`, `/proc`, `/eta`, `/modified`, `/wp`, `/gc` | Consultas de Baritone. |
+| `GET` | `/baritone/version`, `/proc`, `/eta`, `/modified`, `/paused`, `/wp`, `/gc` | Consultas de Baritone. |
 | `GET` | `/baritone/help?q=...`, `/find?block=...` | Consultas con parametro. |
-| `POST` | `/baritone/goto`, `/goal`, `/mine`, `/build`, `/follow` | Acciones de Baritone. |
+| `POST` | `/baritone/goto`, `/goal`, `/mine`, `/build`, `/follow`, `/thisway` | Acciones de Baritone. |
 | `POST` | `/baritone/stop`, `/axis`, `/tunnel`, `/cleararea`, `/explore` | Mas acciones. |
-| `POST` | `/baritone/surface`, `/cancel`, `/invert`, `/come`, `/elytra`, ... | Acciones sin argumentos. |
+| `POST` | `/baritone/surface`, `/pause`, `/resume`, `/sel`, `/set`, ... | Acciones sin argumentos. |
 | `POST` | `/baritone/repack`, `/reloadall`, `/saveall`, `/render` | Mantenimiento de cache. |
 | `GET` | `/` | Indice de endpoints. |
 
@@ -318,6 +318,7 @@ tienen ese problema.
 ```powershell
 curl.exe -s "$BASE/baritone/version"
 curl.exe -s "$BASE/baritone/eta"
+curl.exe -s "$BASE/baritone/paused"
 curl.exe -s "$BASE/baritone/help?q=mine"
 curl.exe -s "$BASE/baritone/find?block=diamond_ore"
 ```
@@ -326,8 +327,8 @@ curl.exe -s "$BASE/baritone/find?block=diamond_ore"
 { "ok": true, "data": { "sent": "#find diamond_ore" } }
 ```
 
-Disponibles sin parametro: `version`, `proc`, `eta`, `modified`, `wp`, `gc`.
-Con parametro: `help?q=`, `find?block=`.
+Disponibles sin parametro: `version`, `proc`, `eta`, `modified`, `paused`, `wp`,
+`gc`. Con parametro: `help?q=`, `find?block=`.
 
 ### Acciones (`POST`)
 
@@ -336,7 +337,10 @@ curl.exe -s -X POST "$BASE/baritone/goto" -H $AUTH -d '{"x":1000,"y":64,"z":500}
 curl.exe -s -X POST "$BASE/baritone/mine" -H $AUTH -d '{"block":"diamond_ore","amount":16}'
 curl.exe -s -X POST "$BASE/baritone/build" -H $AUTH -d '{"file":"base.schematic"}'
 curl.exe -s -X POST "$BASE/baritone/follow" -H $AUTH -d '{"target":"Alex"}'
+curl.exe -s -X POST "$BASE/baritone/cleararea" -H $AUTH -d '{"radius":5}'
 curl.exe -s -X POST "$BASE/baritone/stop?force"
+curl.exe -s -X POST "$BASE/baritone/pause"
+curl.exe -s -X POST "$BASE/baritone/thisway" -H $AUTH -d '{"distance":50}'
 ```
 
 `goto` admite las tres formas que entiende Baritone:
@@ -351,9 +355,35 @@ curl.exe -s -X POST "$BASE/baritone/stop?force"
 Mezclas parciales (`{"x":1,"y":2}`) dan `400 invalid_goal` en vez de dejar que
 Baritone lo interprete de otra forma.
 
-Sin argumentos: `surface`, `top`, `invert`, `come`, `blacklist`, `elytra`,
-`farm`, `cancel`, `path`, `thisway`.
+Sin argumentos: `surface`, `cancel`, `path`, `invert`, `come`, `blacklist`,
+`elytra`, `click`, `pause`, `resume`, `farm`, `sel`, `set`, `reset`,
+`waypoints`, `sethome`, `home`, `explorefilter`, `pickup`.
 Mantenimiento: `repack`, `reloadall`, `saveall`, `render`.
+
+### Nombres que no son los que parecen
+
+Esto se verifico contra las firmas del codigo fuente de Baritone, no contra su
+documentacion. Varios nombres intuitivos no existen como comandos:
+
+| Endpoint | Comando real | Por que |
+|---|---|---|
+| `POST /baritone/stop` | `#cancel` | No hay `StopCommand`; `stop` es alias de `cancel` |
+| `POST /baritone/cleararea` | `#sel cleararea N` | No hay `ClearAreaCommand`; es subcomando de `sel` |
+| `GET /baritone/modified` | `#modified` | No hay `ModifiedCommand`; es alias de `set` |
+| `GET /baritone/wp` | `#waypoints` | `wp` es alias |
+| `POST /baritone/top` | `#surface` | `top` es alias |
+
+Y hay comandos que no estaban cubiertos: `pause`, `resume`, `paused`, `set`,
+`reset`, `sel`, `click`, `pickup`, `explorefilter`, `waypoints`, `sethome`,
+`home`, `litematica`.
+
+`schematica` **no** esta disponible: esta comentado en `DefaultCommands.java`,
+por lo que solo se puede construir con `build`.
+
+Dos comandos exigen argumento y por eso no admiten `POST` sin cuerpo:
+`thisway` (`requireExactly(1)`) y `axis` (pide la altura). Mandarlos vacios da
+`400 requires_arguments` o `400 missing_field`, en vez de dejar que Baritone
+responda con un error.
 
 ### La respuesta de Baritone va al chat
 

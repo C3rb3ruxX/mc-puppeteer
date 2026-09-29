@@ -245,7 +245,8 @@ public class PuenteSmokeTest {
 			{"/baritone/proc", "#proc"},
 			{"/baritone/eta", "#eta"},
 			{"/baritone/modified", "#modified"},
-			{"/baritone/wp", "#wp"},
+			{"/baritone/paused", "#paused"},
+			{"/baritone/wp", "#waypoints"},
 			{"/baritone/gc", "#gc"},
 			{"/baritone/help?q=mine", "#help mine"},
 			{"/baritone/find?block=diamond_ore", "#find diamond_ore"},
@@ -272,13 +273,17 @@ public class PuenteSmokeTest {
 			{"/baritone/build", "{\"file\":\"base.schematic\"}", "#build base.schematic"},
 			{"/baritone/follow", "{\"target\":\"Alex\"}", "#follow Alex"},
 			{"/baritone/tunnel", "{\"height\":1,\"width\":2,\"length\":3}", "#tunnel 1 2 3"},
-			{"/baritone/cleararea", "{\"radius\":5}", "#cleararea 5"},
+			// cleararea es subcomando de sel, no comando propio
+			{"/baritone/cleararea", "{\"radius\":5}", "#sel cleararea 5"},
 			{"/baritone/explore", "{\"x\":100,\"z\":200}", "#explore 100 200"},
 			{"/baritone/explore", "{}", "#explore"},
 			{"/baritone/axis", "{\"y\":12}", "#axis 12"},
-			{"/baritone/stop", "{}", "#stop"},
+			// thisway exige distancia; stop es alias de cancel
+			{"/baritone/thisway", "{\"distance\":50}", "#thisway 50"},
+			{"/baritone/stop", "{}", "#cancel"},
 			{"/baritone/surface", "{}", "#surface"},
-			{"/baritone/cancel", "{}", "#cancel"},
+			{"/baritone/pause", "{}", "#pause"},
+			{"/baritone/resume", "{}", "#resume"},
 			{"/baritone/repack", "{}", "#repack"},
 		};
 		for (String[] p : posts) {
@@ -289,18 +294,35 @@ public class PuenteSmokeTest {
 			n++;
 		}
 
-		r = call("POST", "/baritone/stop?force", "{}", true);
-		check("[" + n + "] POST /baritone/stop?force -> #forcecancel", r.status() == 202 && r.body().contains("#forcecancel"), r.body());
-		if (r.status() == 202) dispatched++;
-		n++;
+		// Los alias se traducen al nombre canonico que registra Baritone
+		String[][] aliases = {
+			{"/baritone/stop?force", "{}", "#forcecancel"},
+			{"/baritone/top", "{}", "#surface"},
+			{"/baritone/home", "{}", "#home"},
+		};
+		for (String[] p : aliases) {
+			r = call("POST", p[0], p[1], true);
+			boolean ok = r.status() == 202 && r.body().contains(p[2]);
+			check("[" + n + "] alias " + p[0] + " -> " + p[2], ok, r.status() + " " + r.body());
+			if (ok) dispatched++;
+			n++;
+		}
 
 		// Rechazos: coordenadas incoherentes e inyeccion de texto
 		String[][] rejects = {
 			{"/baritone/goto", "{}", "400", "invalid_goal"},
 			{"/baritone/goto", "{\"x\":1,\"y\":2}", "400", "invalid_goal"},
 			{"/baritone/axis", "{\"y\":999}", "400", "invalid_field"},
+			{"/baritone/axis", "{}", "400", "missing_field"},
 			{"/baritone/explore", "{\"x\":100}", "400", "invalid_field"},
 			{"/baritone/cleararea", "{\"radius\":0}", "400", "invalid_field"},
+			{"/baritone/thisway", "{}", "400", "missing_field"},
+			// thisway exige 1 argumento en Baritone: no puede ir sin cuerpo
+			{"/baritone/thisway", "{\"distance\":0}", "400", "invalid_field"},
+			// mine y build exigen bloque/fichero
+			{"/baritone/mine", "{}", "400", "missing_field"},
+			// schematica esta comentado en DefaultCommands: no hay ruta
+			{"/baritone/schematica", "{}", "404", "not_found"},
 			// Ruta no registrada: el router la rechaza antes de llegar al traductor.
 			{"/baritone/inventario", "{}", "404", "not_found"},
 			// /baritone/find solo admite GET; por POST debe dar 405, no enviar nada.
@@ -337,6 +359,117 @@ public class PuenteSmokeTest {
 		check("[" + n + "] todos los mensajes Baritone llevan prefijo '#'",
 			sentChat.stream().filter(s -> s.startsWith("#")).count() >= dispatched, sentChat.toString());
 		n++;
+
+		// --- sincronizacion con el codigo de Baritone ------------------------
+		// El registro de comandos se contrasta contra BaritoneCommandSignatures,
+		// que esta extraido de las firmas del source de Baritone. Asi, si un dia
+		// Baritone renombra o quita un comando, falla aqui y no en juego.
+		List<String> canonicos = new ArrayList<>();
+		for (String s : BaritoneCommandSignatures.CANONICAL) canonicos.add(s);
+		List<String> delTraductor = new ArrayList<>();
+		for (BaritoneTranslator.Command c : BaritoneTranslator.INSTANCE.getCOMMANDS()) {
+			delTraductor.add(c.getNames().get(0));
+		}
+		List<String> faltan = new ArrayList<>(canonicos);
+		faltan.removeAll(delTraductor);
+		check("[" + n + "] el registro cubre todos los comandos de Baritone",
+			faltan.isEmpty(), "faltan: " + faltan);
+		n++;
+
+		List<String> sobran = new ArrayList<>(delTraductor);
+		sobran.removeAll(canonicos);
+		check("[" + n + "] el registro no inventa comandos inexistentes",
+			sobran.isEmpty(), "sobran: " + sobran);
+		n++;
+
+		// Comandos que Baritone no expone pese a parecer que si
+		for (String noExiste : BaritoneCommandSignatures.UNAVAILABLE) {
+			boolean ok = BaritoneTranslator.INSTANCE.resolve(noExiste) == null;
+			check("[" + n + "] '" + noExiste + "' no existe en Baritone y no se traduce",
+				ok, "resolve -> " + BaritoneTranslator.INSTANCE.resolve(noExiste));
+			n++;
+		}
+
+		// Los alias tienen que resolver al nombre canonico
+		String[][] resolucion = {
+			{"stop", "cancel"}, {"c", "cancel"}, {"top", "surface"},
+			{"wp", "waypoints"}, {"waypoint", "waypoints"}, {"highway", "axis"},
+			{"p", "pause"}, {"paws", "pause"}, {"unpause", "resume"},
+			{"selection", "sel"}, {"s", "sel"}, {"forward", "thisway"},
+			{"mod", "modified"}, {"settings", "set"}, {"rescan", "repack"},
+		};
+		for (String[] a : resolucion) {
+			String got = BaritoneTranslator.INSTANCE.resolve(a[0]);
+			check("[" + n + "] alias '" + a[0] + "' -> '" + a[1] + "'",
+				a[1].equals(got), "resolve -> " + got);
+			n++;
+		}
+
+		// Comandos que exigen argumentos no pueden enviarse vacios
+		for (String req : BaritoneCommandSignatures.REQUIRE_ARGUMENTS) {
+			boolean ok = false;
+			String codigo = "";
+			try {
+				BaritoneTranslator.INSTANCE.noArg(req);
+			} catch (com.bonilla.puente.http.HttpError e) {
+				ok = "requires_arguments".equals(e.getCode());
+				codigo = e.getCode();
+			}
+			check("[" + n + "] '" + req + "' exige argumentos y no se envia vacio", ok, codigo);
+			n++;
+		}
+
+		// Y los que no los exigen, si
+		for (String sin : new String[]{"surface", "cancel", "path", "invert", "blacklist", "click", "elytra", "pause", "resume"}) {
+			check("[" + n + "] '" + sin + "' se puede enviar sin argumentos",
+				("#" + sin).equals(BaritoneTranslator.INSTANCE.noArg(sin)), BaritoneTranslator.INSTANCE.noArg(sin));
+			n++;
+		}
+
+		// Clasificacion: cada traductor acepta lo suyo y rechaza lo demas.
+		// Se comprueba el codigo de error cuando se espera rechazo, y el comando
+		// exacto cuando se espera exito.
+		Object[][] clasificacion = {
+			// metodo,      comando,      debeRechazar, codigoEsperado / comandoEsperado
+			{"readOnly", "version", false, "#version"},
+			{"readOnly", "waypoints", false, "#waypoints"},
+			{"readOnly", "sel", true, "not_read_only"},
+			{"readOnly", "repack", true, "not_read_only"},
+			{"maintenance", "repack", false, "#repack"},
+			{"maintenance", "saveall", false, "#saveall"},
+			{"maintenance", "version", true, "not_maintenance"},
+			{"maintenance", "surface", true, "not_maintenance"},
+			{"noArg", "surface", false, "#surface"},
+			// version no exige argumentos, asi que noArg lo admite
+			{"noArg", "version", false, "#version"},
+			// estos si los exigen segun IArgConsumer
+			{"noArg", "tunnel", true, "requires_arguments"},
+			{"noArg", "find", true, "requires_arguments"},
+			{"noArg", "waypoints", true, "requires_arguments"},
+		};
+		for (Object[] c : clasificacion) {
+			String metodo = (String) c[0];
+			String cmd = (String) c[1];
+			boolean debeRechazar = (Boolean) c[2];
+			String esperado = (String) c[3];
+			String obtenido = "";
+			boolean ok;
+			try {
+				String salida = switch (metodo) {
+					case "readOnly" -> BaritoneTranslator.INSTANCE.readOnly(cmd, null);
+					case "maintenance" -> BaritoneTranslator.INSTANCE.maintenance(cmd);
+					default -> BaritoneTranslator.INSTANCE.noArg(cmd);
+				};
+				ok = !debeRechazar && salida.equals(esperado);
+				obtenido = salida;
+			} catch (com.bonilla.puente.http.HttpError e) {
+				ok = debeRechazar && e.getCode().equals(esperado);
+				obtenido = e.getCode();
+			}
+			check("[" + n + "] " + metodo + " " + cmd + (debeRechazar ? " rechaza" : " acepta"),
+				ok, obtenido);
+			n++;
+		}
 
 		// --- limite de tasa --------------------------------------------------
 		Thread.sleep(200);

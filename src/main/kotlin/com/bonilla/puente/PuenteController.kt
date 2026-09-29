@@ -137,6 +137,12 @@ class PuenteController(
 
 	fun baritoneStop(force: Boolean): String = baritone(BaritoneTranslator.stop(force))
 
+	fun baritonePause(): String = baritone(BaritoneTranslator.pause())
+
+	fun baritoneResume(): String = baritone(BaritoneTranslator.resume())
+
+	fun baritoneThisway(distance: Int): String = baritone(BaritoneTranslator.thisway(distance))
+
 	fun baritoneAxis(y: Int?): String = baritone(BaritoneTranslator.axis(y))
 
 	fun baritoneTunnel(height: Int, width: Int, length: Int): String =

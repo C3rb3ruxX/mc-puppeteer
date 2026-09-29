@@ -225,7 +225,8 @@ class PuenteHttpServer(
 			"/baritone/proc" -> getBaritone(exchange) { controller.baritoneReadOnly("proc", null) }
 			"/baritone/eta" -> getBaritone(exchange) { controller.baritoneReadOnly("eta", null) }
 			"/baritone/modified" -> getBaritone(exchange) { controller.baritoneReadOnly("modified", null) }
-			"/baritone/wp" -> getBaritone(exchange) { controller.baritoneReadOnly("wp", null) }
+			"/baritone/paused" -> getBaritone(exchange) { controller.baritoneReadOnly("paused", null) }
+			"/baritone/wp" -> getBaritone(exchange) { controller.baritoneReadOnly("waypoints", null) }
 			"/baritone/help" -> getBaritone(exchange) { controller.baritoneReadOnly("help", queryString(exchange, "q")) }
 			"/baritone/find" -> getBaritone(exchange) { controller.baritoneFind(queryString(exchange, "block").orEmpty()) }
 			"/baritone/gc" -> getBaritone(exchange) { controller.baritoneReadOnly("gc", null) }
@@ -289,6 +290,14 @@ class PuenteHttpServer(
 				controller.baritoneCleararea(readJson(exchange).optInt("radius") ?: 1)
 			}
 
+			// thisway exige exactamente un argumento en Baritone (requireExactly(1)),
+			// asi que va con cuerpo y no en el grupo sin argumentos.
+			"/baritone/thisway" -> postBaritone(exchange) {
+				val d = readJson(exchange).optInt("distance")
+					?: throw HttpError(400, "missing_field", "'thisway' necesita 'distance'")
+				controller.baritoneThisway(d)
+			}
+
 			"/baritone/explore" -> postBaritone(exchange) {
 				val b = readJson(exchange)
 				controller.baritoneExplore(b.optInt("x"), b.optInt("z"))
@@ -296,7 +305,10 @@ class PuenteHttpServer(
 
 			"/baritone/surface", "/baritone/top", "/baritone/invert",
 			"/baritone/come", "/baritone/blacklist", "/baritone/elytra",
-			"/baritone/farm", "/baritone/cancel", "/baritone/path", "/baritone/thisway" ->
+			"/baritone/farm", "/baritone/cancel", "/baritone/stop", "/baritone/path",
+			"/baritone/pause", "/baritone/resume", "/baritone/click", "/baritone/pickup",
+			"/baritone/explorefilter", "/baritone/sel", "/baritone/set", "/baritone/reset",
+			"/baritone/waypoints", "/baritone/sethome", "/baritone/home" ->
 				postBaritone(exchange) { controller.baritoneNoArg(route.substringAfterLast("/")) }
 
 			else -> send(exchange, 404, errorBody("not_found", "Endpoint desconocido: $BASE_PATH$route"))
@@ -334,12 +346,21 @@ class PuenteHttpServer(
 		add("post", JsonArray().apply {
 			POST_ROUTES.forEach { add("POST $BASE_PATH/baritone/$it") }
 		})
+		add("notas", JsonArray().apply {
+			add("'stop' es alias de 'cancel'; 'forcecancel' es un comando aparte.")
+			add("'cleararea' es un subcomando de 'sel': se envia como '#sel cleararea N'.")
+			add("'wp' es alias de 'waypoints'; 'top' lo es de 'surface'.")
+			add("'schematica' esta desactivado en Baritone; usa 'build'.")
+			add("'thisway' exige distancia, y 'axis' altura: no admiten llamarse sin argumentos.")
+		})
 	}
 
-	private val READ_ONLY_ROUTES = listOf("version", "proc", "eta", "modified", "wp", "help", "find", "gc")
+	private val READ_ONLY_ROUTES = listOf("version", "proc", "eta", "modified", "paused", "wp", "help", "find", "gc")
 	private val POST_ROUTES = listOf(
 		"goto", "goal", "mine", "build", "follow", "stop", "axis", "tunnel", "cleararea", "explore",
-		"surface", "top", "invert", "come", "blacklist", "elytra", "farm", "cancel", "path", "thisway",
+		"thisway", "surface", "top", "invert", "come", "blacklist", "elytra", "farm", "cancel",
+		"path", "pause", "resume", "click", "pickup", "explorefilter", "sel", "set", "reset",
+		"waypoints", "sethome", "home",
 		"repack", "reloadall", "saveall", "render",
 	)
 
