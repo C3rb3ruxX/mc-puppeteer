@@ -11,8 +11,9 @@
  *   src/main/java/baritone/command/defaults/ExecutionControlCommands.java -> pause/resume/paused/cancel
  *   src/main/java/baritone/command/defaults/SelCommand.java       -> CLEARAREA("cleararea", "ca")
  *
- * Version verificada: v1.20.0 (la que trae Minecraft 26.3). El jar de release
- * de la API no incluye las implementaciones, asi que la lista sale del source.
+ * Version verificada: v1.20.0 (la misma con 1.21.5; los comandos de Baritone
+ * son independientes de la version de Minecraft). El jar de release de la API
+ * no incluye las implementaciones, asi que la lista sale del source.
  *
  * Que se comprobo y por que importa:
  *

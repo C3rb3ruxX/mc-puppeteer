@@ -36,7 +36,7 @@ Minecraft**.
                             ^ implementa
   +--------------------------------------------------------------+
   |  source set: client                                          |
-  |  ClientBridge        llamadas reales a MC 26.3              |
+  |  ClientBridge        llamadas reales a MC 1.21.5              |
   |  ClientMainThread    MainThreadExecutor sobre Minecraft     |
   |  ChatCapture         eventos de Fabric API                  |
   |  PuenteClient   costura y ciclo de vida                |
@@ -104,7 +104,7 @@ codigo habria hecho el commit mas dificil de revisar sin gain real.
 | Archivo | Responsabilidad |
 |---|---|
 | `PuenteClient.kt` | Lee config, valida, genera token si falta, monta el grafo, arranca/detiene el servidor. |
-| `ClientBridge.kt` | Implementa `MinecraftBridge` contra las APIs reales de 26.3. |
+| `ClientBridge.kt` | Implementa `MinecraftBridge` contra las APIs reales de 1.21.5 (mappings oficiales de Mojang). |
 | `ClientMainThread.kt` | `MainThreadExecutor` sobre `Minecraft.execute` / `isSameThread`. |
 | `ChatCapture.kt` | Registra `ClientReceiveMessageEvents` y `ClientSendMessageEvents`. |
 

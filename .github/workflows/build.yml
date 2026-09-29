@@ -17,7 +17,10 @@ jobs:
       - name: setup jdk
         uses: actions/setup-java@v5
         with:
-          java-version: '25'
+          # Minecraft 1.21.5 corre en Java 21, y es tambien el minimo que pide
+          # Loom 1.17 para arrancar el daemon de Gradle. Con Java 21 el build
+          # compila el bytecode del mod para 21 sin toolchain de por medio.
+          java-version: '21'
           distribution: 'microsoft'
       - name: make gradle wrapper executable
         run: chmod +x ./gradlew

@@ -126,7 +126,7 @@ curl.exe -s "$BASE/status" -H $AUTH
   "ok": true,
   "data": {
     "modVersion": "1.0.0",
-    "minecraftVersion": "26.3",
+    "minecraftVersion": "1.21.5",
     "inWorld": true,
     "screen": null,
     "playerName": "Steve",

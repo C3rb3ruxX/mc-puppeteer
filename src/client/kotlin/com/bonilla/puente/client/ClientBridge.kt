@@ -18,15 +18,27 @@ import org.slf4j.Logger
 import java.util.Optional
 
 /**
- * Implementacion de [MinecraftBridge] contra las APIs reales de MC 26.3.
+ * Implementacion de [MinecraftBridge] contra las APIs reales de MC 1.21.5.
  *
- * Nombres verificados con `javap` sobre el jar deobfuscado de 26.3 (no de memoria):
- * - `net.minecraft.client.Minecraft`                          (antes `MinecraftClient`)
- * - `net.minecraft.client.multiplayer.ClientPacketListener`  (antes `ClientPlayNetworkHandler`)
- * - `Minecraft.setScreenAndShow(...)` -> delega en `Minecraft.gui.setScreen(...)`;
- *   el campo `screen` **ya no existe** en `Minecraft` (ver `agents/00-research-dump.md`).
- * - `ResourceKey.identifier()` en vez de `location()`.
- * - `GameProfile` es un `record` en authlib 10: `id()` / `name()` explicitos.
+ * El mod compila contra los mappings **oficiales de Mojang**, asi que los
+ * nombres son los reales de las clases del juego y no los de Yarn. Todo lo de
+ * abajo se verifico con `javap` sobre los jars remapeados que deja Loom en
+ * `~/.gradle/caches/fabric-loom/minecraftMaven/net/minecraft/`, no de memoria
+ * (el detalle esta en `agents/06-migracion-1.21.5.md`):
+ * - `net.minecraft.client.Minecraft`               (no `MinecraftClient`: ese es
+ *   el nombre de Yarn; Mojang llama a la clase `Minecraft`).
+ * - `net.minecraft.client.multiplayer.ClientPacketListener` (no `ClientPlayNetworkHandler`).
+ * - `Minecraft.level` / `.player` / `.screen` son **campos publicos**, no
+ *   getters, y `disconnectFromWorld(...)` (el nombre de 26.x) no existe: el
+ *   equivalente a "salir al titulo" son tres llamadas, ver [leaveWorld].
+ * - `ClientCommonPacketListenerImpl.sendChat(String)` / `.sendCommand(String)`:
+ *   en 1.21.5 heredan de ahi en vez de estar en `ClientPacketListener`, pero los
+ *   nombres son los mismos.
+ * - `ResourceKey.location()`, no `identifier()` (que era el nombre de 26.x).
+ * - `User` tiene seis parametros de constructor, el ultimo es `User.Type`, y
+ *   `LEGACY` es el de las cuentas sin autenticar (ver [setPlayerName]).
+ * - `GameProfile` es una clase con getters (`getName()`/`getId()`), no un record
+ *   como en 26.x, asi que Kotlin los expone como propiedades.
  *
  * TODOS los metodos se invocan desde el hilo principal de juego: lo garantiza
  * `MainThreadBridge`, que los agenda con `Minecraft.execute`.
@@ -51,13 +63,13 @@ class ClientBridge(
 			modVersion = modVersion,
 			minecraftVersion = minecraftVersion,
 			inWorld = level != null,
-			screen = mc.gui.screen()?.javaClass?.simpleName,
-			playerName = player?.gameProfile?.name(),
+			screen = mc.screen?.javaClass?.simpleName,
+			playerName = player?.gameProfile?.name,
 			playerUuid = player?.uuid?.toString(),
 			serverAddress = serverData?.ip,
 			serverName = serverData?.name,
 			worldName = worldName,
-			dimension = level?.dimension()?.identifier()?.toString(),
+			dimension = level?.dimension()?.location()?.toString(),
 			fps = mc.fps,
 			playerCount = level?.players()?.size ?: 0,
 			maxPlayers = serverData?.players?.max() ?: 0,
@@ -103,9 +115,7 @@ class ClientBridge(
 		if (mc.level != null || mc.getConnection() != null) {
 			// Hay que cerrar la sesion actual antes de abrir otra; si no, MC se
 			// queda en una pantalla intermedia sin opcion de continuar.
-			// `disconnectFromWorld` es el equivalente a "salir al titulo" en 26.3:
-			// desconecta el nivel, cierra la conexion y muestra la TitleScreen.
-			mc.disconnectFromWorld(Component.translatable("menu.quitting"))
+			leaveWorld(mc)
 		}
 
 		val address = try {
@@ -116,9 +126,9 @@ class ClientBridge(
 
 		val data = ServerData(name, "$host:$port", ServerData.Type.OTHER)
 		// `parent` = pantalla actual (o la de titulo si no hay ninguna): al
-		// cancelar la conexion se vuelve a ella. El parametro esta anotado como
-		// no nulo en 26.3, asi que hay que garantizarlo aqui.
-		ConnectScreen.startConnecting(mc.gui.screen() ?: TitleScreen(), mc, address, data, false, null)
+		// cancelar la conexion se vuelve a ella. En 1.21.5 el ultimo parametro
+		// es el `TransferState` (para "transfer" entre servidores) y admite null.
+		ConnectScreen.startConnecting(mc.screen ?: TitleScreen(), mc, address, data, false, null)
 		logger.info("Conectando a {}:{} solicitado por la API HTTP", host, port)
 	}
 
@@ -127,18 +137,17 @@ class ClientBridge(
 		if (mc.level == null && mc.getConnection() == null) {
 			throw PuenteException(409, "not_connected", "El cliente no esta conectado a ningun mundo")
 		}
-		mc.disconnectFromWorld(Component.translatable("menu.quitting"))
+		leaveWorld(mc)
 		logger.info("Desconexion solicitada por la API HTTP")
 	}
 
 	override fun onlinePlayers(): List<RemotePlayerInfo> {
 		val connection = Minecraft.getInstance().getConnection() ?: return emptyList()
-		return connection.getOnlinePlayers().map { info ->
-			// `getProfile()` esta anotado como no nulo en 26.3.
+		return connection.onlinePlayers.map { info ->
 			val profile = info.profile
 			RemotePlayerInfo(
-				name = profile.name(),
-				uuid = profile.id()?.toString().orEmpty(),
+				name = profile.name,
+				uuid = profile.id?.toString().orEmpty(),
 				latencyMs = info.latency,
 				displayName = info.tabListDisplayName?.string,
 			)
@@ -146,13 +155,13 @@ class ClientBridge(
 	}
 
 	override fun playerIdentity(): PlayerIdentity {
-		val user = Minecraft.getInstance().getUser()
-		return PlayerIdentity(name = user.getName(), uuid = user.getProfileId().toString())
+		val user = Minecraft.getInstance().user
+		return PlayerIdentity(name = user.name, uuid = user.profileId.toString())
 	}
 
 	override fun setPlayerName(name: String): PlayerIdentity {
 		val mc = Minecraft.getInstance()
-		val current = mc.getUser()
+		val current = mc.user
 
 		if (!NAME_PATTERN.matches(name)) {
 			throw PuenteException(
@@ -180,9 +189,14 @@ class ClientBridge(
 			uuid,
 			// El token se conserva: solo es relevante en servidores con modo
 			// online, y esta identidad es valida para offline.
-			current.getAccessToken(),
+			current.accessToken,
 			Optional.empty(),
 			Optional.empty(),
+			// `LEGACY` es la sesion sin autenticar de Mojang; con `MSA` el juego
+			// intentaria autenticar contra Yggdrasil con un token que no
+			// corresponde a este UUID. Con `LEGACY` se usa `MinecraftSessionService`,
+			// que es lo que corresponde a una identidad offline.
+			User.Type.LEGACY,
 		)
 
 		try {
@@ -195,7 +209,7 @@ class ClientBridge(
 		}
 
 		val inWorld = mc.level != null || mc.getConnection() != null
-		val effective = mc.getUser().getName()
+		val effective = mc.user.name
 		if (effective != name) {
 			// No deberia pasar: si `set` no hubiera surtido efecto, mejor fallar
 			// aqui que devolver una identidad que no es la real.
@@ -219,6 +233,27 @@ class ClientBridge(
 			?: throw PuenteException(409, "not_connected", "El cliente no esta conectado a ningun servidor")
 
 	/**
+	 * "Salir al titulo" en 1.21.5, que es la operacion que hace el boton
+	 * "Desconectar" del menu de pausa.
+	 *
+	 * En 26.3 era una sola llamada (`disconnectFromWorld(Component)`); aqui no
+	 * existe tal metodo, asi que se compone con las tres piezas que usa el
+	 * propio juego, en el mismo orden que `PauseScreen.onDisconnect()`:
+	 *
+	 * 1. `Connection.disconnect(motivo)`: el servidor recibe "menu.quitting" en
+	 *    vez de un cierre generico.
+	 * 2. `Minecraft.disconnect()`: cierra la conexion y desmonta el mundo. Para
+	 *    un mundo integrado espera a que el servidor termine de guardar.
+	 * 3. `setScreen(TitleScreen())`: `disconnect()` deja una pantalla de
+	 *    progreso; el titulo es lo que espera quien llama a la API.
+	 */
+	private fun leaveWorld(mc: Minecraft) {
+		mc.getConnection()?.connection?.disconnect(Component.translatable("menu.quitting"))
+		mc.disconnect()
+		mc.setScreen(TitleScreen())
+	}
+
+	/**
 	 * Campo de [Minecraft] que guarda la identidad, localizado por tipo.
 	 *
 	 * `net.minecraft.client.User` es unico entre los campos de `Minecraft`
@@ -235,7 +270,8 @@ class ClientBridge(
 		}
 		val field = matches.single()
 		// `Field.set` sobre un `final` no estatico funciona con `setAccessible`
-		// (probado en Java 25); los campos estaticos finales si que lo requieren.
+		// (verificado en Java 21, que es el runtime de 1.21.5); los campos
+		// estaticos finales si que lo requieren.
 		field.isAccessible = true
 		return field
 	}
@@ -246,7 +282,7 @@ class ClientBridge(
 
 		/** Resuelto una sola vez: la version de MC no cambia durante la sesion. */
 		val minecraftVersion: String by lazy {
-			runCatching { SharedConstants.getCurrentVersion().name() }.getOrDefault("desconocida")
+			runCatching { SharedConstants.getCurrentVersion().name }.getOrDefault("desconocida")
 		}
 	}
 }

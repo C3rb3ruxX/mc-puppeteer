@@ -27,32 +27,51 @@ red de pruebas) que:
 7. comprueba que el limitador de tasa corta,
 8. apaga el servidor.
 
+### Compilar y ejecutar (Linux / macOS)
+
+El nucleo HTTP (`main`) **no toca ninguna clase de Minecraft**, asi que el
+classpath minimo son las clases compiladas mas Gson, SLF4J y el stdlib de
+Kotlin. No hacen falta los jars de Minecraft ni el de `fabric-loader`:
+
+```bash
+./gradlew build
+
+cache="$HOME/.gradle/caches/modules-2/files-2.1"
+jar() { find "$cache/$1" -name "$2" ! -name '*sources*' | sort -V | tail -1; }
+
+cp="build/classes/kotlin/main"
+cp="$cp:$(jar com.google.code.gson/gson 'gson-*.jar')"
+cp="$cp:$(jar org.slf4j/slf4j-api 'slf4j-api-*.jar')"
+cp="$cp:$(jar org.jetbrains.kotlin/kotlin-stdlib 'kotlin-stdlib-2*.jar')"
+
+out="${TMPDIR:-/tmp}/puente-smoke-out"
+mkdir -p "$out"
+javac -nowarn -cp "$cp" -d "$out" \
+    agents/tests/PuenteSmokeTest.java agents/tests/BaritoneCommandSignatures.java
+java -cp "$out:$cp" PuenteSmokeTest
+```
+
+Sale con codigo de salida 1 si algo falla, asi que sirve directamente en CI.
+
 ### Compilar y ejecutar (Windows / PowerShell)
 
 ```powershell
 .\gradlew.bat build
 
-$tmp   = "C:\Users\cerbe\AppData\Local\Temp\opencode"
-$gson  = Get-ChildItem "$env:USERPROFILE\.gradle\caches\modules-2\files-2.1\com.google.code.gson\gson" -Recurse -Filter "gson-*.jar" | Where-Object Name -notmatch 'sources' | Select -First 1
-$slf4j = Get-ChildItem "$env:USERPROFILE\.gradle\caches\modules-2\files-2.1\org.slf4j" -Recurse -Filter "*.jar" | Where-Object Name -notmatch 'sources' | Select -Expand FullName
-$kotlin= Get-ChildItem "$env:USERPROFILE\.gradle\caches\modules-2\files-2.1\org.jetbrains.kotlin\kotlin-stdlib" -Recurse -Filter "*.jar" | Where-Object Name -notmatch 'sources' | Select -First 1
-$loader= Get-ChildItem "$env:USERPROFILE\.gradle\caches\modules-2\files-2.1\net.fabricmc\fabric-loader" -Recurse -Filter "*.jar" | Where-Object Name -notmatch 'sources' | Select -First 1
-$loomy = "$env:USERPROFILE\.gradle\caches\fabric-loom\minecraftMaven\net\minecraft"
-$cp = @(
-  "build\classes\kotlin\main"
-  $gson.FullName
-  $loader.FullName
-  "$loomy\minecraft-clientonly-deobf\26.3\minecraft-clientonly-deobf-26.3.jar"
-  "$loomy\minecraft-common-deobf\26.3\minecraft-common-deobf-26.3.jar"
-  $kotlin.FullName
-) + $slf4j
-$full = ($cp -join ';')
+$cache = "$env:USERPROFILE\.gradle\caches\modules-2\files-2.1"
+$gson   = Get-ChildItem "$cache\com.google.code.gson\gson"  -Recurse -Filter "gson-*.jar"        | Where-Object Name -notmatch 'sources' | Select -First 1
+$slf4j  = Get-ChildItem "$cache\org.slf4j\slf4j-api"        -Recurse -Filter "slf4j-api-*.jar"   | Where-Object Name -notmatch 'sources' | Select -First 1
+$kotlin = Get-ChildItem "$cache\org.jetbrains.kotlin\kotlin-stdlib" -Recurse -Filter "*.jar"   | Where-Object Name -notmatch 'sources' | Select -First 1
+$cp = @("build\classes\kotlin\main", $gson.FullName, $slf4j.FullName, $kotlin.FullName) -join ';'
 
-& "C:\Program Files\Java\jdk-25.0.2\bin\javac.exe" -nowarn -cp $full -d "$tmp\out" agents\tests\PuenteSmokeTest.java agents\tests\BaritoneCommandSignatures.java
-& "C:\Program Files\Java\jdk-25.0.2\bin\java.exe"  -cp "$tmp\out;$full" PuenteSmokeTest
+$out = "$env:TEMP\puente-smoke-out"
+New-Item -ItemType Directory -Force $out | Out-Null
+javac -nowarn -cp $cp -d $out agents\tests\PuenteSmokeTest.java agents\tests\BaritoneCommandSignatures.java
+java  -cp "$out;$cp" PuenteSmokeTest
 ```
 
-Sale con codigo de salida 1 si algo falla, asi que sirve directamente en CI.
+Los comandos usan el `javac`/`java` que haya en el `PATH`, que es el JDK con el
+que se lanzo Gradle (Java 21 para Minecraft 1.21.5).
 
 > Requiere el puerto 25599 libre. Esta fuera del 25580 que usa el mod, para no
 > chocar con una sesion de juego abierta.
@@ -136,7 +155,7 @@ Lo que **no** cubren, y no se puede con este banco:
   puede instanciar `Minecraft` sin arrancar el juego; se verifico aparte
   contra el jar real que hay un unico campo de tipo `net.minecraft.client.User`,
   que `setAccessible` responde y que escribir un `final` no estatico con `Field.set`
-  funciona en Java 25.
+  funciona en Java 21 (el runtime de 1.21.5).
 - Que el UUID que calculamos sea el que espera el servidor. Verificado aparte
   contra `UUIDUtil.createOfflinePlayerUUID`, que coincide con
   `nameUUIDFromBytes("OfflinePlayer:" + nombre)`.
@@ -242,11 +261,12 @@ inexistente, la prueba falla en ambos sentidos (`faltan: [elytra]`,
 
 ### El hueco que mas me preocupa
 
-`ClientBridge.connect()` hace `disconnectFromWorld(...)` y acto seguido
-`ConnectScreen.startConnecting(...)` en el mismo tick. Es la secuencia que usa
-el propio juego, pero **en transiciones de mundo hay estados intermedios**
-(carga de mundo, `LocalPlayer` aun no creado, recursos descargados) en los que
-llamar a `sendChat` o consultar `status` puede dar un resultado raro.
+`ClientBridge.connect()` cierra la sesion actual (`leaveWorld`) y acto seguido
+llama a `ConnectScreen.startConnecting(...)` en el mismo tick. Es la secuencia
+que usa el propio juego, pero **en transiciones de mundo hay estados
+intermedios** (carga de mundo, `LocalPlayer` aun no creado, recursos
+descargados) en los que llamar a `sendChat` o consultar `status` puede dar un
+resultado raro.
 
 No es un fallo conocido, es una zona sin verificar. Lo primero que haria falta
 es un bot de pruebas que:

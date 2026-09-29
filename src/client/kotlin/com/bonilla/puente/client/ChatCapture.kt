@@ -27,7 +27,7 @@ class ChatCapture(private val log: ChatLog) {
 					epochMillis = Instant.now().toEpochMilli(),
 					kind = CapturedMessage.Kind.CHAT,
 					text = message.string,
-					sender = sender?.name(),
+					sender = sender?.name,
 					overlay = false,
 				)
 			)

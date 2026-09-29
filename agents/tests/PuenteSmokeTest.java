@@ -58,7 +58,7 @@ public class PuenteSmokeTest {
 			String profileUuid = "uuid-1";
 			@Override public ClientStatus status() {
 				onMainThreadCalls.incrementAndGet();
-				return new ClientStatus("1.0.0", "26.3", true, "ChatScreen", "Steve", "uuid-1",
+				return new ClientStatus("1.0.0", "1.21.5", true, "ChatScreen", "Steve", "uuid-1",
 					"localhost:25565", "Mi servidor", null, "minecraft:overworld", 144, 3, 20, true,
 					isDead.get());
 			}

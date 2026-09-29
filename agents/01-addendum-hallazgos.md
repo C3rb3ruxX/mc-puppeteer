@@ -3,12 +3,22 @@
 > Complemento de `00-research-dump.md`. Recoge todo lo que se descubrió
 > **al compilar**, es decir, lo que el `javap` inicial no dejó ver porque son
 > detalles de nulabilidad o de ubicación de estado.
+>
+> **Estado tras migrar a 1.21.5** (rama `migrate/1.21.5`): estos hallazgos se
+> hicieron compilando sobre Minecraft 26.x, y los puntos 1 a 5 **son al revés en
+> 1.21.5**, que es la razón principal de que la migración no haya sido cambiar
+> una versión y ya. Cada uno lleva debajo su estado real. Los puntos 6 a 9
+> (prueba de humo, Kotlin, mixins, `environment`) no dependen de la versión y
+> siguen vigentes. El resumen completo está en `06-migracion-1.21.5.md`.
 
 ---
 
 ## 1. `Minecraft` ya no tiene campo `screen` (y tampoco getter)
 
-El dump original asumía `mc.screen`. Al compilar falló. Verificado con
+> **En 1.21.5: no aplica.** `Minecraft` vuelve a tener `public Screen screen;` y
+> `setScreen(Screen)`. No existen ni `gui.screen()` ni `setScreenAndShow`.
+
+El dump original asumía `mc.screen`. Al compilar con 26.x falló. Verificado con
 `javap -p` sobre el **campo y los metodos privados**:
 
 ```
@@ -18,7 +28,7 @@ public final net.minecraft.client.gui.Gui gui;
 ```
 
 No existe ningun campo ni ningun `getScreen()`/`screen()` que devuelva `Screen`
-en `Minecraft`. En 26.3 ese estado se movio a la clase `Gui`:
+en el `Minecraft` de 26.x. En 26.3 ese estado se movio a la clase `Gui`:
 
 ```java
 // net.minecraft.client.gui.Gui
@@ -37,12 +47,19 @@ public boolean canInterruptScreen();
 | Cambiar de pantalla | `mc.gui.setScreen(...)` o `mc.setScreenAndShow(...)` |
 
 **Consecuencia para el diseno:** `ConnectScreen.startConnecting` exige la pantalla
-actual como `parent`, y ese parametro esta anotado como **no nulo**, asi que hay
-que resolver `mc.gui.screen() ?: TitleScreen()`.
+actual como `parent`, asi que hay que resolver `mc.gui.screen() ?: TitleScreen()`.
+En 1.21.5 se resuelve con `mc.screen ?: TitleScreen()`, porque `Minecraft.screen`
+vuelve a ser un campo publico (anotado como nulable, asi que la elvision `?:` es
+igualmente necesaria).
 
 ## 2. `disconnect` ya no acepta un `Component`
 
-Fallo de compilacion: `Minecraft.disconnect(Screen, boolean)` y
+> **En 1.21.5: no aplica, pero con una trampa.** No existe ni `disconnectFromWorld`
+> ni un `disconnect` que acepte un `Component`. Los metodos reales son
+> `disconnect()`, `disconnect(Screen)` y `disconnect(Screen, boolean)`, y el
+> "salir al titulo" hay que componerlo a mano: `leaveWorld()` en `ClientBridge`.
+
+Fallo de compilacion con 26.x: `Minecraft.disconnect(Screen, boolean)` y
 `disconnect(Screen, boolean, boolean)`. La variante que recibe texto de motivo es
 otra:
 
@@ -64,8 +81,24 @@ Es el metodo correcto para `POST /disconnect` y para cerrar la sesion antes de
 conectar a otro servidor. `disconnect(Screen, boolean)` es de bajo nivel: exige
 que le pases tu propia pantalla de destino.
 
+En 1.21.5, `Minecraft.disconnect()` sin argumentos equivale a
+`disconnect(new ProgressScreen(true), false)`: cierra la conexion y desmonta el
+mundo (esperando, si es integrado, a que el servidor termine de guardar), pero
+deja una pantalla de progreso. La secuencia equivalente al boton "Desconectar" del
+menu de pausa, y la que usa este mod, es:
+
+```kotlin
+mc.getConnection()?.connection?.disconnect(Component.translatable("menu.quitting"))
+mc.disconnect()
+mc.setScreen(TitleScreen())
+```
+
 ## 3. `ResourceKey.location()` -> `identifier()`
 
+> **En 1.21.5: no aplica.** Se llama `location()`, no `identifier()`. Con
+> mappings de Mojang el tipo de retorno es `ResourceLocation`, no `Identifier`.
+
+En 26.x:
 ```java
 public net.minecraft.resources.Identifier identifier();
 public net.minecraft.resources.Identifier registry();
@@ -74,6 +107,12 @@ public net.minecraft.resources.Identifier registry();
 Afecta a `level.dimension().location()` en el estado.
 
 ## 4. `GameProfile` es un `record` en authlib 10
+
+> **En 1.21.5: no aplica.** MC 1.21.5 usa authlib 6.x, donde `GameProfile` sigue
+> siendo una clase normal con `getName()` / `getId()`. Kotlin los expone como
+> propiedades sinteticas, asi que el codigo usa `profile.name` y `profile.id`.
+
+En 26.x (authlib 10):
 
 ```java
 public final class GameProfile extends java.lang.Record {
@@ -92,8 +131,13 @@ Igual aplica a los records del propio Minecraft, por ejemplo
 
 ## 5. MC 26.3 trae anotaciones de nulabilidad
 
-Kotlin resolvio varios parametros de MC como **no nulos**, no como tipos de
-plataforma. Casos reales que hubo que corregir:
+> **En 1.21.5: no aplica.** Los jars de 1.21.5 llegan a Kotlin como tipos de
+> plataforma, asi que `mc.screen`, `mc.player`, `mc.level` y demas admiten `?:` o
+> `!!` sin problema, y `ConnectScreen.startConnecting` acepta `null` en el
+> `TransferState` final. Es el comportamiento de siempre en 1.21.x.
+
+En 26.x, Kotlin resolvio varios parametros de MC como **no nulos**, no como tipos
+de plataforma. Casos reales que hubo que corregir:
 
 - `ConnectScreen.startConnecting(Screen, ...)` — `Screen` no nulo.
 - `Minecraft.getInstance()` — no nulo (`instance` se asigna en el propio
@@ -106,8 +150,9 @@ funcione**. Hay que resolver el valor o lanzar excepcion.
 
 ## 6. Correcciones que salio la prueba de humo
 
-Las ejecuto `agents/tests/PuenteSmokeTest.java` (48 aserciones). Dos fallos
-eran bugs reales del nucleo, no de la prueba:
+Las ejecuto `agents/tests/PuenteSmokeTest.java` (156 aserciones: las 48 de la
+primera tanda mas las que se fueron añadeendo con cada endpoint nuevo). Dos
+fallos eran bugs reales del nucleo, no de la prueba:
 
 ### 6.1 Codigos de error inconsistentes
 

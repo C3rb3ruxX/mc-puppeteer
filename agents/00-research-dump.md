@@ -1,12 +1,17 @@
-# Dump de investigación — mc-puppeteer (Fabric MC 26.3)
+# Dump de investigación — mc-puppeteer (Fabric MC)
 
 > Documento generado **antes** de escribir código. Contiene todo lo investigado
-> sobre el estado del proyecto y las APIs reales de Minecraft 26.3.
+> sobre el estado del proyecto y las APIs reales de Minecraft.
 > Cualquier decisión de diseño posterior debe justificarse contra este documento.
 >
 > **Este archivo es una foto histórica del análisis previo.** Varias cosas se
 > Movieron al escribir el código. Donde la implementación difiere del plan que
 > aquí se propone, la lista está en `02-implementacion.md` §11.
+>
+> **Actualizado tras la migración a 1.21.5** (rama `migrate/1.21.5`): las
+> secciones que nombraban 26.3 se han reescrito contra las firmas reales de
+> 1.21.5, verificadas con `javap`. El resumen de la migración está en
+> `06-migracion-1.21.5.md`.
 
 ---
 
@@ -59,14 +64,14 @@ src/
 
 | Propiedad | Valor |
 |---|---|
-| `minecraft_version` | `26.3` |
+| `minecraft_version` | `1.21.5` |
 | `loader_version` | `0.19.5` |
-| `loom_version` | `1.18-SNAPSHOT` |
+| `loom_version` | `1.17.21` |
 | `fabric_kotlin_version` | `1.14.1+kotlin.2.4.20` |
-| `fabric_api_version` | `0.161.0+26.3` |
+| `fabric_api_version` | `0.128.2+1.21.5` |
 | `version` (mod) | `1.0.0` |
 | `group` | `com.bonilla` |
-| Java / Kotlin target | 25 |
+| Java / Kotlin target | 21 |
 | Kotlin plugin | `2.4.20` |
 
 ### Build
@@ -76,32 +81,45 @@ src/
 - `environment: "*"` en `fabric.mod.json` (aunque el mod es client-only en la práctica).
 - Entry points declarados con `"adapter": "kotlin"`.
 - Datagen de cliente habilitado (`configureDataGeneration { client = true }`).
-- CI en `.github/workflows/build.yml` (solo build, no pruebas).
+- CI en `.github/workflows/build.yml` (solo build, no pruebas), con Java 21.
 - Gradle: `org.gradle.jvmargs=-Xmx1G`, `parallel=true`, `configuration-cache=true`.
+- Plugin de Loom: `net.fabricmc.fabric-loom-remap` (**no** `net.fabricmc.fabric-loom`,
+  que es el alias "sin remapeo" pensado para las versiones que Mojang ya publica
+  legibles). Mappings: `mappings(loom.officialMojangMappings())`, los oficiales.
 
 ---
 
-## 4. HALLAZGO CRÍTICO — MC 26.3 renombró las clases principales
+## 4. HALLAZGO CRÍTICO — con qué nombres hay que llamar a Minecraft
 
-Verificado por inspección directa del jar deobfuscado
-(`~/.gradle/caches/fabric-loom/minecraftMaven/net/minecraft/minecraft-clientonly-deobf/26.3/`).
+Verificado por inspección directa del jar remapeado de 1.21.5
+(`~/.gradle/caches/fabric-loom/minecraftMaven/net/minecraft/minecraft-{clientonly,common}/1.21.5-*/`).
 
-En 26.3 **ya no existen** los nombresufsicos de las versiones 1.20/1.21.
-El código copiado de tutoriales antiguos **no compilará**:
+1.21.5 se distribuye **ofuscada**, así que hay que elegir un juego de mappings
+antes de compilar. Este proyecto usa las **mappings oficiales de Mojang**
+(mojmap), con lo que se compila contra los nombres reales de las clases de
+Minecraft:
 
-| Nombre clásico (≤1.21) | Nombre real en 26.3 | Paquete real en 26.3 |
+| Nombre de Yarn (el de los tutoriales de 1.20/1.21) | Nombre real en 1.21.5 (mojmap) | Paquete real |
 |---|---|---|
 | `MinecraftClient` | **`Minecraft`** | `net.minecraft.client.Minecraft` |
 | `ClientPlayNetworkHandler` | **`ClientPacketListener`** | `net.minecraft.client.multiplayer.ClientPacketListener` |
-| `ResourceLocation` | **`Identifier`** | `net.minecraft.resources.Identifier` |
-| `PlayerEntity` (cliente) | **`LocalPlayer`** | `net.minecraft.client.player.LocalPlayer` |
+| `Identifier` | **`ResourceLocation`** | `net.minecraft.resources.ResourceLocation` |
+| `LocalPlayer` | `LocalPlayer` (igual) | `net.minecraft.client.player.LocalPlayer` |
 | `ClientWorld` | **`ClientLevel`** | `net.minecraft.client.multiplayer.ClientLevel` |
 | `ServerAddress` | `ServerAddress` (igual) | `net.minecraft.client.multiplayer.resolver.ServerAddress` |
 | `ChatHud` | **`ChatComponent`** | `net.minecraft.client.gui.components.ChatComponent` |
 | `ClientLifecycleEvents` | igual | `net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientLifecycleEvents` |
-Confirmado en el propio template: `McPuppeteer.kt` ya importa
-`net.minecraft.resources.Identifier`, lo que delata que el proyecto sí está
-alineado con 26.3.
+
+Si el proyecto compila con Yarn en vez de mojmap, hay que invertir **toda** esta
+tabla. El template inicial (`McPuppeteer.kt`) importaba
+`net.minecraft.resources.Identifier`, o sea que venia escrito para la nomenclatura
+de 26.x; en 1.21.5 ese import pasa a ser `ResourceLocation` (único cambio de
+`main` que hizo falta).
+
+Lo que **no** cambia entre 1.21.5 y 26.x es el nombre de estas clases: ambas
+versiones usan los nombres de Mojang. Por eso el código escrito para 26.x casi
+compilaba tal cual aquí; los cambios reales están en los métodos, no en las
+clases (ver `06-migracion-1.21.5.md`).
 
 ---
 
@@ -114,25 +132,39 @@ public class Minecraft extends net.minecraft.util.thread.ReentrantBlockableEvent
         implements com.mojang.blaze3d.platform.WindowEventHandler {
     public static Minecraft getInstance();
     public void execute(Runnable);          // heredado de BlockableEventLoop
+    public boolean isSameThread();          // ídem
     public ClientPacketListener getConnection();   // null si no hay servidor
     public ServerData getCurrentServer();
     public LocalPlayer player;              // campo público
     public ClientLevel level;               // campo público
-    public GameProfile getGameProfile();
-    public void setScreenAndShow(Screen);   // OJO: no es "setScreen"
-    public void disconnectFromWorld(Component);
-    public boolean hasSingleplayerServer();
+    public Screen screen;                   // campo público
+    public void setScreen(Screen);
+    public void disconnect();                        // = disconnect(new ProgressScreen(true), false)
+    public void disconnect(Screen);
+    public void disconnect(Screen, boolean);
     public IntegratedServer getSingleplayerServer();
+    public boolean isLocalServer();
+    public User getUser();                  // User.getName() / getProfileId() / getAccessToken()
     public boolean isWindowActive();
+    public int getFps();
 }
 ```
 
 Puntos de atención:
-- **`setScreen` NO existe**, el método es `setScreenAndShow(Screen)`.
+- **`setScreen(Screen)` sí existe** (no hay `setScreenAndShow`, que era el nombre
+  en 26.x).
+- **No hay `disconnectFromWorld(Component)`**, que era la forma de "salir al
+  título" en 26.x. En 1.21.5 esa operación se compone de tres pasos, los mismos
+  que hace `PauseScreen.onDisconnect()`: `Connection.disconnect(motivo)` +
+  `Minecraft.disconnect()` + `setScreen(TitleScreen())`. Está encapsulado en
+  `ClientBridge.leaveWorld()`.
+- `Minecraft` **no** tiene `getGameProfile()`: la identidad se lee de
+  `getUser()`, y su campo `private final User user` se sustituye por reflexión
+  (mismo truco que en 26.x).
 - `execute(Runnable)` viene de `BlockableEventLoop`; también existen
   `submit(Runnable)`, `submit(Supplier)`, `executeIfPossible`, `schedule(R)`,
   `isSameThread()`. `execute` es el correcto para acciones diferidas (no bloqueantes).
-- `getConnection()` es `ClientPacketListener` en 26.3, no
+- `getConnection()` es `ClientPacketListener` en 1.21.5 también, no
   `ClientCommonPacketListenerImpl`. Devuelve `null` en el menú principal.
 
 ### 5.2 Envío de chat y comandos — `ClientPacketListener`
@@ -168,6 +200,7 @@ public static void startConnecting(
 
 `net.minecraft.client.multiplayer.resolver.ServerAddress`:
 ```java
+public ServerAddress(String host, int puerto);   // ctor usado por el puente
 public static ServerAddress parseString(String);   // "host:puerto" o "host"
 public static boolean isValidAddress(String);
 public String getHost(); public int getPort();
@@ -177,6 +210,8 @@ public String getHost(); public int getPort();
 ```java
 public ServerData(String name, String ip, ServerData.Type type);
 public ServerData.Type type();  // SERVER / OTHER
+public String name; public String ip;                              // campos públicos
+public ServerStatus.Players players;                               // record -> max()
 ```
 
 → Para "conectarse al servidor que se mande" por HTTP: construir
@@ -189,7 +224,7 @@ Disponibles en `fabric-message-api-v1` (`ClientReceiveMessageEvents`):
 
 ```java
 // net.fabricmc.fabric.api.client.message.v1.ClientReceiveMessageEvents
-Event<Chat>  CHAT;   // (Component, PlayerChatMessage, GameProfile, ChatType.Bound, Instant)
+Event<Chat>  CHAT;   // (Component, PlayerChatMessage, GameProfile, MessageType.Parameters, Instant)
 Event<Game>  GAME;   // (Component message, boolean overlay)
 Event<ChatCanceled>  CHAT_CANCELED;
 Event<GameCanceled>  GAME_CAMELED;
@@ -331,7 +366,8 @@ si viene), para que el error sea explícito y no silencioso.
 | Riesgo | Mitigación |
 |---|---|
 | El nombre de una clase cambia entre builds de MC | Todo lo verificado con `javap` contra el jar real, no de memoria. |
-| `setScreen` vs `setScreenAndShow` | Verificado: solo existe `setScreenAndShow`. |
+| `setScreen` vs `setScreenAndShow` | Verificado en 1.21.5: solo existe `setScreen(Screen)`. |
+| Que mappings se apliquen mal (clases en intermediary) | Dependencias de mods con `modImplementation`, no `implementation`: es lo que hace que Loom las remapee al namespace elegido. |
 | `sendCommand` con barra | Se documenta y se valida en el borde. |
 | Bloquear el hilo de render | Cola acotada + `offer` no bloqueante. |
 | Puerto ocupado al arrancar | Se captura el `BindException` y se avisa por log, sin romper el juego. |
@@ -342,6 +378,11 @@ si viene), para que el error sea explícito y no silencioso.
 
 ## 9. Verificación
 
-Al final de cada cambio: `gradlew.bat build` debe pasar.
+Al final de cada cambio: `./gradlew build` debe pasar.
 Fuente de verdad para firmas: `javap` sobre
-`~/.gradle/caches/fabric-loom/minecraftMaven/net/minecraft/minecraft-{clientonly,common}-deobf/26.3/`.
+`~/.gradle/caches/fabric-loom/minecraftMaven/net/minecraft/minecraft-{clientonly,common}/1.21.5-*/`.
+
+Además del build, en la migración a 1.21.5 se ejecutó `./gradlew runDatagen`, que
+arranca el juego real (sin ventana) con Loader 0.19.5, FLK y Fabric API: sirve
+para confirmar que el mod carga, que las mappings son las correctas y que el
+núcleo HTTP levanta dentro del cliente.

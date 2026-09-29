@@ -2,7 +2,7 @@ package com.bonilla
 
 import net.fabricmc.api.ModInitializer
 import net.fabricmc.loader.api.FabricLoader
-import net.minecraft.resources.Identifier
+import net.minecraft.resources.ResourceLocation
 import org.slf4j.LoggerFactory
 
 object McPuppeteer : ModInitializer {
@@ -18,6 +18,6 @@ object McPuppeteer : ModInitializer {
 			.map { it.metadata.version.friendlyString }.orElse("desconocida"))
 	}
 
-	fun id(path: String): Identifier
-		= Identifier.fromNamespaceAndPath(MOD_ID, path)
+	fun id(path: String): ResourceLocation
+		= ResourceLocation.fromNamespaceAndPath(MOD_ID, path)
 }

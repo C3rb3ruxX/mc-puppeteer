@@ -1,6 +1,6 @@
 # mc-puppeteer
 
-Mod de Fabric para Minecraft 26.3 que abre un **servidor HTTP local en un hilo
+Mod de Fabric para Minecraft 1.21.5 que abre un **servidor HTTP local en un hilo
 aparte** para controlar el cliente de Minecraft por HTTP: enviar chat y
 comandos, leer el chat que llega, consultar el estado del cliente, y conectar o
 desconectar de servidores.
@@ -37,14 +37,17 @@ La documentacion vive en [`agents/`](agents/), en este orden:
 
 | Fichero | Que contiene |
 |---|---|
-| [`00-research-dump.md`](agents/00-research-dump.md) | Analisis **previo** a escribir codigo: APIs de MC 26.3 verificadas, arquitectura propuesta, riesgos. |
-| [`01-addendum-hallazgos.md`](agents/01-addendum-hallazgos.md) | Lo que se descubrio **al compilar**: `Minecraft` ya no tiene `screen`, `disconnect` cambio de firma, MC 26.3 trae anotaciones de nulabilidad, y demas. |
+| [`00-research-dump.md`](agents/00-research-dump.md) | Analisis **previo** a escribir codigo: con que nombres hay que llamar a Minecraft, arquitectura propuesta, riesgos. |
+| [`01-addendum-hallazgos.md`](agents/01-addendum-hallazgos.md) | Lo que se descubrio **al compilar**: firmas que no salen de la documentacion, y que con 1.21.5 son al reves de como estaban en 26.3. |
 | [`02-implementacion.md`](agents/02-implementacion.md) | Documento de construccion: arquitectura, ficheros, garantias de rendimiento, seguridad, API completa, tabla de errores, y donde se desvia del plan. |
 | [`03-testing.md`](agents/03-testing.md) | Como ejecutar la prueba de humo, que cubre, y que queda sin cubrir. |
 | [`05-api.md`](agents/05-api.md) | Referencia de la API con ejemplos listos para copiar y pegar, codigos de error y un bug conocido. |
-| [`tests/PuenteSmokeTest.java`](agents/tests/PuenteSmokeTest.java) | 48 aserciones sobre el nucleo HTTP, ejecutables sin Minecraft. |
+| [`06-migracion-1.21.5.md`](agents/06-migracion-1.21.5.md) | La bajada de 26.3 a 1.21.5: versiones, cambios de build, tabla de firmas que cambiaron y como se verifico todo. |
+| [`tests/PuenteSmokeTest.java`](agents/tests/PuenteSmokeTest.java) | 156 aserciones sobre el nucleo HTTP, ejecutables sin Minecraft. |
 
 ## Compilar
+
+Requiere **Java 21** (el de Minecraft 1.21.5).
 
 ```bash
 ./gradlew build        # o .\gradlew.bat build en Windows
