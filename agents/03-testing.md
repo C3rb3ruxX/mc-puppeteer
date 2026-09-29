@@ -20,7 +20,7 @@ red de pruebas) que:
 1. construye un `MinecraftBridge` **falso** que solo registra en que hilo se
    le llamo,
 2. levanta un `PuenteHttpServer` real en `127.0.0.1:25599`,
-3. le manda 179 peticiones con `java.net.http.HttpClient`,
+3. le manda 191 peticiones con `java.net.http.HttpClient`,
 4. comprueba estado HTTP, codigo de error y contenido,
 5. comprueba que el buffer acotado se comporta,
 6. comprueba que los comandos de Baritone se traducen y salen por chat,
@@ -53,6 +53,9 @@ java -cp "$out:$cp" PuenteSmokeTest
 
 Sale con codigo de salida 1 si algo falla, asi que sirve directamente en CI.
 
+Aparte, `tests/DashboardSmokeTest.java` prueba el panel de instancias (21
+aserciones) con un stub que hace de Puente; no necesita Minecraft.
+
 ### Compilar y ejecutar (Windows / PowerShell)
 
 ```powershell
@@ -76,6 +79,20 @@ que se lanzo Gradle (Java 21 para Minecraft 1.21.5).
 > Requiere el puerto 25599 libre. Esta fuera del 25580 que usa el mod, para no
 > chocar con una sesion de juego abierta.
 
+### Banco del panel
+
+`tests/DashboardSmokeTest.java` sigue la misma forma, pero en vez de un
+`MinecraftBridge` falso levanta un **stub HTTP** que imita a Puente, y el hub del
+panel encima. No necesita ni Minecraft ni el jar deobfuscado.
+
+```powershell
+& "C:\Program Files\Java\jdk-25.0.2\bin\javac.exe" -nowarn -cp $full -d "$tmp\out" agents\tests\DashboardSmokeTest.java
+& "C:\Program Files\Java\jdk-25.0.2\bin\java.exe"  -cp "$tmp\out;$full" DashboardSmokeTest
+```
+
+Los dos bancos se pueden compilar y ejecutar seguidos. Los puertos son
+efimeros, asi que no chocan ni entre si ni con una sesion de juego abierta.
+
 ### Fichero de copia
 
 El fichero de este repositorio es la version canonica. Su nombre de clase
@@ -83,7 +100,7 @@ coincide con el del fichero (`PuenteSmokeTest`), que es lo que exige Java
 para una clase publica; el comando de arriba invoca ese nombre.
 
 Hubo antes una copia en `%TEMP%\opencode\SmokeTest.java` con el nombre corto
-`SmokeTest`. Esa variante daba 179/179 igual, pero rompia el comando documentado
+`SmokeTest`. Esa variante daba 191/191 igual, pero rompia el comando documentado
 en cuanto se copiaba al repositorio, porque `javac` no acepta una clase
 publica cuyo nombre no coincida con el del `.java`. Se renombro al integrarla.
 
@@ -136,6 +153,49 @@ publica cuyo nombre no coincida con el del `.java`. Se renombro al integrarla.
 - La asercion 23 tambien fijaba 25580, es decir, **codificaba el bug**. Al
   corregirlo, la prueba fallo: senal de que la prueba vigilaba el valor
   equivocado, no el correcto.
+
+### Inventario (12)
+- Sin mundo -> `409 not_connected`.
+- 9 huecos de barra rapida y 27 de mochila, siempre todos: un hueco vacio lleva
+  `id: null` y `count: 0`, no se omite.
+- `id` es la ruta del registro (`minecraft:diamond_pickaxe`) y `name` el texto
+  traducido: se comprueban los dos por separado.
+- El desgaste (`damage`/`maxDamage`) solo aparece en objetos que se estropean;
+  en el resto es `null`, no `0`.
+- La armadura viene indexada por pieza (`head`, `chest`, `legs`, `feet`), y una
+  pieza puede estar vacia sin desaparecer del mapa.
+- La mano secundaria lleva `index: -1` y queda fuera de la mochila.
+- `filled` cuenta solo los huecos con algo, y se expone `selectedSlot`.
+- `POST /inventory` -> `405`.
+
+Lo que **no** cubren: que los ids y los nombres sean los de verdad. El fake
+inventa `minecraft:diamond_pickaxe`; que `BuiltInRegistries.ITEM.getKey` devuelva
+la ruta correcta solo se comprueba dentro del juego.
+
+### Panel de instancias (20)
+En `agents/tests/DashboardSmokeTest.java`, con un stub que hace de Puente:
+
+- El panel se sirve como HTML y **sin** cabeceras CORS.
+- El listado marca `online` con el estado real de cada instancia, y una instancia
+  apagada sale con `error` en vez de romper el listado.
+- El proxy reenvia `GET` y `POST` con su metodo, su cuerpo y su query string.
+- El hub inyecta `Authorization: Bearer` con el token guardado, y ese token
+  **no** aparece en ninguna respuesta.
+- Una instancia apagada da `502 instance_offline`; una que no existe, `400`.
+- No se admite dar de alta un host que no sea loopback, ni un dominio (anti-SSRF).
+- Una peticion con `Host: evil.com` da `403 bad_host` (DNS rebinding), y una sin
+  `Host` tambien. Se comprueba con socket en crudo porque `java.net.http` no deja
+  poner esa cabecera a mano, y ademas se verifica que una peticion normal si pasa,
+  para que el test no se conforme con un 403 universal.
+- El registro sobrevive a un reinicio del hub, y `DELETE` saca la instancia.
+
+Un fallo que solo aparecio al ejecutarlo de verdad, no en el banco: con un
+registro en un path relativo sin carpeta, `Files.createDirectories(file.parent)`
+lanza NPE porque `parent` es `null`. El banco no lo cazaba porque usaba
+`Files.createTempFile`, que si devuelve un path absoluto.
+
+Lo que **no** cubren: el JavaScript del panel (no hay pruebas de navegador) ni
+el comportamiento con muchas instancias simultaneas.
 
 ### Identidad offline (10) y reaparicion (10)
 - `GET /profile` devuelve nombre y UUID actuales.

@@ -238,6 +238,14 @@ class PuenteHttpServer(
 				}
 			}
 
+			// --- Inventario ---------------------------------------------------
+			// Solo lectura y sin efectos: leer 36 slots en el hilo principal es
+			// una instantanea barata, y por eso no necesita paginar.
+			"/inventory" -> {
+				requireMethod(exchange, "GET")
+				send(exchange, 200, okBody(controller.inventory().toJson()))
+			}
+
 			"/baritone" -> send(exchange, 200, okBody(baritoneIndex()))
 
 			// --- Baritone: consultas por GET ---------------------------------

@@ -1,11 +1,16 @@
-import com.bonilla.puente.*;
+  import com.bonilla.puente.*;
+  import com.google.gson.JsonArray;
+  import com.google.gson.JsonObject;
+  import com.google.gson.JsonParser;
 
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
-import java.util.ArrayList;
-import java.util.List;
+  import java.util.ArrayList;
+  import java.util.LinkedHashMap;
+  import java.util.List;
+  import java.util.Map;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -93,10 +98,42 @@ public class PuenteSmokeTest {
 				isDead.set(false);
 				respawns.incrementAndGet();
 			}
-			@Override public List<RemotePlayerInfo> onlinePlayers() {
-				onMainThreadCalls.incrementAndGet();
-				return List.of(new RemotePlayerInfo("Alex", "uuid-2", 42, "Alex"));
+		@Override public List<RemotePlayerInfo> onlinePlayers() {
+			onMainThreadCalls.incrementAndGet();
+			return List.of(new RemotePlayerInfo("Alex", "uuid-2", 42, "Alex"));
+		}
+		@Override public PlayerInventory inventory() {
+			onMainThreadCalls.incrementAndGet();
+			checkOnMain("inventory");
+			if (!inWorld.get()) {
+				throw new PuenteException(409, "not_connected", "El cliente no esta en ningun mundo");
 			}
+			// Reproduce los tres casos que importan del JSON: un objeto con
+			// desgaste, uno que se estropea pero sin dano, y un hueco vacio que
+			// debe seguir presente.
+			List<ItemSlot> hotbar = new ArrayList<>();
+			for (int i = 0; i < 9; i++) {
+				if (i == 0) {
+					hotbar.add(new ItemSlot(i, "minecraft:diamond_pickaxe", 1, "Pico de diamante", 12, 1561));
+				} else if (i == 1) {
+					hotbar.add(new ItemSlot(i, null, 0, null, null, null));
+				} else {
+					hotbar.add(new ItemSlot(i, "minecraft:stone", 64, "Piedra", null, null));
+				}
+			}
+			List<ItemSlot> main = new ArrayList<>();
+			for (int i = 9; i < 36; i++) {
+				main.add(new ItemSlot(i, "minecraft:dirt", 32, "Tierra", null, null));
+			}
+			Map<String, ItemSlot> armor = new LinkedHashMap<>();
+			armor.put("head", new ItemSlot(5, "minecraft:iron_helmet", 1, "Casco de hierro", 3, 165));
+			armor.put("chest", new ItemSlot(6, "minecraft:iron_chestplate", 1, "Peto de hierro", 3, 240));
+			// Sin pieza en las piernas: el hueco se conserva.
+			armor.put("legs", new ItemSlot(7, null, 0, null, null, null));
+			armor.put("feet", new ItemSlot(8, "minecraft:iron_boots", 1, "Botas de hierro", 3, 195));
+			return new PlayerInventory(3, hotbar, main, armor,
+				new ItemSlot(-1, "minecraft:shield", 1, "Escudo", null, null));
+		}
 			@Override public PlayerIdentity playerIdentity() {
 				onMainThreadCalls.incrementAndGet();
 				checkOnMain("playerIdentity");
@@ -307,6 +344,62 @@ public class PuenteSmokeTest {
 
 		r = call("GET", "/respawn", null, true);
 		check("[27t] GET /respawn -> 405, reaparecer no es idempotente por GET",
+			r.status() == 405, r.status() + " " + r.body());
+
+		// --- inventario -----------------------------------------------------
+		// Sin mundo no hay `LocalPlayer`, asi que no hay inventario que leer.
+		// El bloque de respawn deja `inWorld` a true, asi que se baja antes.
+		inWorld.set(false);
+		r = call("GET", "/inventory", null, true);
+		check("[28a] inventario sin mundo -> 409 not_connected",
+			r.status() == 409 && r.body().contains("not_connected"), r.body());
+
+		inWorld.set(true);
+		r = call("GET", "/inventory", null, true);
+		check("[28b] inventario -> 200", r.status() == 200, r.status() + " " + r.body());
+
+		JsonObject inv = JsonParser.parseString(r.body()).getAsJsonObject().getAsJsonObject("data");
+		JsonArray hotbarArr = inv.getAsJsonArray("hotbar");
+		JsonArray mainArr = inv.getAsJsonArray("main");
+		JsonObject armor = inv.getAsJsonObject("armor");
+
+		check("[28c] 9 slots de barra rapida y 27 de mochila",
+			hotbarArr.size() == 9 && mainArr.size() == 27,
+			"hotbar=" + hotbarArr.size() + " main=" + mainArr.size());
+		check("[28d] la armadura se indexa por pieza, no por posicion",
+			armor.size() == 4 && armor.has("head") && armor.has("chest")
+				&& armor.has("legs") && armor.has("feet"),
+			armor.keySet().toString());
+		check("[28e] el id del item es la ruta del registro, no el nombre traducido",
+			hotbarArr.get(0).getAsJsonObject().get("id").getAsString().equals("minecraft:diamond_pickaxe")
+				&& hotbarArr.get(0).getAsJsonObject().get("name").getAsString().equals("Pico de diamante"),
+			hotbarArr.get(0).toString());
+		// El hueco vacio se conserva: si se omitiera, `hotbar[1]` seria el slot 2
+		// y cualquier bot que indexe por posicion estaria leyendo otra cosa.
+		check("[28f] los huecos vacios se conservan con id null y count 0",
+			hotbarArr.get(1).getAsJsonObject().get("id").isJsonNull()
+				&& hotbarArr.get(1).getAsJsonObject().get("count").getAsInt() == 0,
+			hotbarArr.get(1).toString());
+		check("[28g] el desgaste solo aparece en objetos que se estropean",
+			hotbarArr.get(0).getAsJsonObject().get("damage").getAsInt() == 12
+				&& hotbarArr.get(0).getAsJsonObject().get("maxDamage").getAsInt() == 1561
+				&& hotbarArr.get(2).getAsJsonObject().get("damage").isJsonNull()
+				&& hotbarArr.get(2).getAsJsonObject().get("maxDamage").isJsonNull(),
+			hotbarArr.get(2).toString());
+		check("[28h] la mano secundaria va con indice -1 y fuera de la mochila",
+			inv.getAsJsonObject("offhand").get("id").getAsString().equals("minecraft:shield")
+				&& inv.getAsJsonObject("offhand").get("index").getAsInt() == -1,
+			inv.get("offhand").toString());
+		check("[28i] la pieza de armor tambien puede estar vacia",
+			armor.getAsJsonObject("legs").get("id").isJsonNull(), armor.get("legs").toString());
+		// 8 de la barra (el slot 1 vacio) + 27 de mochila + 3 de armadura + 1 escudo.
+		check("[28j] filled cuenta solo los huecos con algo",
+			inv.get("filled").getAsInt() == 39, inv.get("filled").toString());
+		check("[28k] se expone la ranura seleccionada",
+			inv.get("selectedSlot").getAsInt() == 3, inv.get("selectedSlot").toString());
+
+		r = call("POST", "/inventory", null, true);
+		check("[28l] POST /inventory -> 405, el inventario es de solo lectura",
 			r.status() == 405, r.status() + " " + r.body());
 
 		inWorld.set(false);
@@ -617,7 +710,7 @@ public class PuenteSmokeTest {
 			onMainThreadCalls.get() + " llamadas");
 		n++;
 		// 10 base + 7 de /profile + 3 de /connect sin puerto + 6 de /respawn y /status
-		// + las de Baritone.
+		// + 2 de /inventory + las de Baritone.
 		// De /profile llegan 7: 2 GET + 2 POST validos + 3 POST con nombre de
 		// formato invalido. Los 3 si pasan por el puente a proposito, porque el
 		// patron de nombre se valida en `ClientBridge` (que es quien conoce
@@ -626,7 +719,9 @@ public class PuenteSmokeTest {
 		// (nombre vacio o ausente), que no dependen de MC.
 		// De /respawn llegan 6: 4 POST (2 rechazados + 1 bueno + 1 repetido) y 2 GET
 		// /status. El GET /respawn es 405 y no llega al puente.
-		int profileCalls = 7 + 3 + 6;
+		// De /inventory llegan 2: el 409 sin mundo y el 200 con mundo. El POST es
+		// 405 y se corta antes.
+		int profileCalls = 7 + 3 + 6 + 2;
 		check("[" + n + "] llamadas al puente = 10 base + " + profileCalls + " de perfil/connect + " + dispatched + " de Baritone",
 			onMainThreadCalls.get() == 10 + profileCalls + dispatched, String.valueOf(onMainThreadCalls.get()));
 		n++;

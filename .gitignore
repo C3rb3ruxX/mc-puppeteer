@@ -52,3 +52,9 @@ replay_*.log
 # obsidian
 
 .obsidian/
+
+# panel de instancias
+
+# Guarda el token de cada instancia en claro. No debe acabar en el repo.
+dashboard-instances.json
+dashboard-instances.json.tmp
