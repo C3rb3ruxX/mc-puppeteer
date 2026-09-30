@@ -145,6 +145,25 @@ class PuenteController(
 		addProperty("uptimeMs", uptimeMillis)
 	}
 
+	// ---------------------------------------------------------------- cofre
+
+	/**
+	 * Encola un volcado de inventario en un cofre y devuelve el estado
+	 * resultante de inmediato.
+	 *
+	 * No espera: el trabajo lo hace el tick del cliente ([MinecraftBridge.requestStore]
+	 * en el puente solo guarda la peticion), y por eso el endpoint responde
+	 * `202`. Quien llama tiene que seguir el progreso con [storeState].
+	 *
+	 * @param target cofre pedido, o `null` para "donde este el bot".
+	 * @param storeNow `true` = solo colocar el cofre y dejarlo ahi.
+	 */
+	fun requestStore(target: ChestTarget?, storeNow: Boolean): StoreState =
+		mainThread.callOnMainThread { bridge.requestStore(target, storeNow) }
+
+	/** Estado del volcado en curso. Nunca falla: si no hay ninguno, sale `idle`. */
+	fun storeState(): StoreState = mainThread.callOnMainThread { bridge.storeState() }
+
 	// ------------------------------------------------------------- Baritone
 
 	/** Ver [baritone]: con `PUPPETEER_BARITONE_ASYNC=1` la orden no pasa por el hilo principal. */

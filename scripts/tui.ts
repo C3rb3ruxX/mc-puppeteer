@@ -17,6 +17,7 @@
  *     inventory.ts  panel derecho: items de mas a menos
  *     view.ts       el compositor de los tres bloques
  *     commands.ts   las ordenes
+ *     store.ts      `store` y `storenow`: manda la orden y sigue el estado
  *     panel.ts      lo que pasa al escribir o pulsar
  *
  * Modo script (sin TUI, util en cron):

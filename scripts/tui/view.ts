@@ -76,7 +76,7 @@ const renderFeed = (width: number, height: number): string[] => {
 
 /** El recordatorio de atajos de la ultima linea. */
 const SHORTCUTS =
-	'/say /cmd /baritone /disperse /connect /items /focus /every /sel /quit · @1,3 · 1-9 · Q'
+	'/say /cmd /baritone /disperse /store /storenow /connect /items /focus /every /sel /quit · @1,3 · 1-9 · Q'
 
 /** El panel entero, como texto con saltos de linea. */
 export const render = (): string => {

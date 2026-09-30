@@ -82,6 +82,9 @@ esperas, un `null` en `screen` es normal, no un error.
 | `POST` | `/connect` | Conecta a un servidor. |
 | `POST` | `/disconnect` | Sale al titulo. |
 | `POST` | `/respawn` | Reaparece si el personaje esta muerto. |
+| `POST` | `/store` | Vuelca el inventario en un cofre. Cuerpo `{"x","y","z"}` opcional. |
+| `POST` | `/store/now` | Coloca un cofre donde esta el bot y lo deja. |
+| `GET` | `/store` | Estado del volcado en curso, sin encolar nada. |
 | `GET` | `/profile` | Identidad con la que se conectara el cliente. |
 | `POST` | `/profile` | Cambia el nombre **en caliente** (solo offline). |
 | `GET` | `/debug` | Estado interno del buffer de chat. |
@@ -462,6 +465,150 @@ curl.exe -s "$BASE/debug" -H $AUTH
 `chatDropped` distinto de 0 significa que el buffer se lleno (256 por defecto) y
 esta perdiendo mensajes. Sube `chatBufferSize` si eso pasa.
 
+### `POST /store`, `POST /store/now` y `GET /store`
+
+Vuelcan el inventario del bot en un cofre, colocandolo si hace falta. Es la
+unica parte de la API cuyo trabajo **no** ocurre en la peticion: el endpoint
+deja la orden en manos del tick del cliente y responde al instante, asi que hay
+que seguir el progreso con `GET /store`.
+
+```powershell
+# Al cofre de la config, o al lado del bot si no hay cofre configurado
+curl.exe -s -X POST "$BASE/store" -H $AUTH
+
+# A un cofre concreto
+curl.exe -s -X POST "$BASE/store" -H $AUTH -H "Content-Type: application/json" -d '{ "x": 10, "y": -60, "z": 4 }'
+
+# Colocar un cofre aqui y dejar de vaciar
+curl.exe -s -X POST "$BASE/store/now" -H $AUTH
+
+# Seguir el progreso
+curl.exe -s "$BASE/store" -H $AUTH
+```
+
+Los tres devuelven **la misma forma**, con `state` en minusculas:
+
+```json
+{
+  "ok": true,
+  "data": {
+    "state": "storing",
+    "target": { "x": 10, "y": -60, "z": 4 },
+    "moved": true,
+    "placed": true,
+    "stored": 0,
+    "reason": null
+  }
+}
+```
+
+| Campo | Que es |
+|---|---|
+| `state` | `idle`, `walking`, `placing`, `opening`, `storing`, `done` o `failed`. |
+| `target` | Bloque donde esta (o donde va a estar) el cofre. `null` si aun no se ha decidido. |
+| `moved` | `true` si el bot ha tenido que caminar para llegar. |
+| `placed` | `true` si el cofre lo ha puesto esta operacion. |
+| `stored` | Unidades metidas en el cofre. |
+| `reason` | Motivo en espanol. **Solo** si `state` es `failed`; si no, `null`. |
+
+`done` y `failed` son terminales. Al llegar a cualquiera de los dos, el siguiente
+`POST /store` empieza una operacion nueva y vuelve a `idle`.
+
+#### Donde va el cofre
+
+Para `POST /store`, en este orden:
+
+1. el bloque que venga en el cuerpo (`x`, `y` y `z`, **las tres juntas**: dar solo
+   una es `400 missing_field`, y un valor fuera del mundo es `400 invalid_field`);
+2. si no hay cuerpo, el `chest` de la configuracion;
+3. si tampoco hay, el bloque donde pisa el bot.
+
+`POST /store/now` **ignora las dos primeras reglas**: siempre va al bloque donde
+esta el bot, porque su sentido es "coloca un cofre aqui y dejalo". No lee el
+cuerpo ni el `chest` de la config, asi que mandar coordenadas no cambia nada
+(como en el resto de `POST` sin argumentos, por ejemplo `/baritone/pause`).
+
+Cuidado con el punto 3 y con `/store/now`: un cofre no se puede colocar en el
+bloque que pisa el jugador, asi que en la practica sale **al lado** (o encima, si
+esta a un salto). El `target` del `202` es el bloque pedido; el del `GET /store`
+ya es el bloque real donde ha quedado el cofre.
+
+#### Que necesita
+
+Un cofre (`minecraft:chest`) en la **barra rapida**, ranuras 0 a 8. No vale en
+la mochila: si esta en otro sitio, el estado pasa a `failed` y el `reason` dice
+en que ranura estaba. Con la barra llena de objetos, uno de los cuales es el
+cofre, se coloca bien; para abrirlo se usa una ranura vacia si la hay, y si no
+la que hubiera (abrir un cofre con cualquier objeto en la mano tambien funciona).
+
+#### Como avanza
+
+El trabajo son cuatro fases, ejecutadas en el tick del cliente (una por tick, sin
+bloquear el juego en ningun momento):
+
+| Fase | Que hace |
+|---|---|
+| `walking` | Baritone lleva al bot hasta 4 bloques del cofre. No se camina si ya esta a tiro. |
+| `placing` | Coloca el cofre. Se salta si en el destino ya hay uno. |
+| `opening` | Abre el menu del cofre con un segundo `useItemOn` y la mano vacia. |
+| `storing` | `shift+click` ranura a ranura, dos por tick, y cierra. |
+
+Cada fase tiene su propio plazo (120 s caminando, 4 s colocando, 3 s abriendo,
+15 s volcando) y el trabajo entero tiene uno de 240 s. Al agotarse cualquiera de
+ellos el estado pasa a `failed` con el motivo. `stored` no se rellena hasta el
+final, asi que mientras `state` sea `storing` va a 0: es correcto, no es que
+falle.
+
+Un ejemplo de bucle que espera al final:
+
+```powershell
+$req = @{ Authorization = "Bearer $TOKEN" }
+Invoke-RestMethod -Method Post "$BASE/store" -Headers $req | Out-Null
+do {
+  Start-Sleep -Milliseconds 700
+  $s = (Invoke-RestMethod "$BASE/store" -Headers $req).data
+} while ($s.state -in "idle", "walking", "placing", "opening", "storing")
+$s | ConvertTo-Json
+```
+
+#### Cuando falla, el bot se desconecta
+
+Un `failed` **siempre** va acompanado de una desconexion del mundo (el mismo
+camino que `POST /disconnect`). Es deliberado: un bot parado con la orden
+incumplida no se distingue de uno sano, y ocupa el sitio del servidor igual. Si
+el fallo fue justo no tener el cofre, eso es justo lo que se queria evitar.
+
+Los motivos que salen en `reason` cubren: que no haya mundo o jugador, que el
+cofre no este en la barra rapida, que no haya sitio libre con suelo debajo, que
+el destino este a mas de 64 bloques, que el juego rechace la colocacion o la
+apertura, y los plazos agotados. Todos en espanol y sin acentos.
+
+#### Lo que no se guarda
+
+Del inventario se vacian las 36 ranuras del inventario y de la barra rapida.
+**No** la armadura (36..39) ni la mano secundaria (40): el menu del cofre no
+tiene ranuras para ellas, y mandarle un indice que no existe haria que el juego
+reventara. Si el bot lleva armadura puesta, esa se queda puesta.
+
+#### `chest` en la configuracion
+
+Cofre de destino por defecto, en `config/mc-puppeteer.json`:
+
+```json
+{
+  "enabled": true,
+  "host": "127.0.0.1",
+  "port": 25580,
+  "chest": { "x": 10, "y": -60, "z": 4 }
+}
+```
+
+Es **por instancia** (cada una tiene su propio archivo), y si no esta, `/store`
+sin coordenadas usa el sitio donde este el bot. Las coordenadas se validan al
+arrancar, no en cada peticion: `x` y `z` tienen que estar en
+-30 000 000..30 000 000 e `y` en -2048..2048. Un valor imposible sale por el log
+al arrancar en vez de fallar a mitad de un volcado.
+
 ---
 
 ## 5. Baritone
@@ -799,6 +946,11 @@ Si el hilo principal no contesta a tiempo, el error es:
 ```
 
 con HTTP **503**. Suele significar que el juego esta colgado o cargando.
+
+**Excepcion: `/store` y `/store/now`.** Su `202` no quiere decir que la accion
+este hecha, sino que el trabajo se ha encolado para el siguiente tick del
+cliente. Por eso no tienen timeout de hilo principal y hay que preguntar despues
+a `GET /store` (ver la seccion 4).
 
 ---
 

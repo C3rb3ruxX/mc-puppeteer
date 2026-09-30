@@ -10,6 +10,7 @@ import { bar, c, paint, pad } from './ansi.ts'
 import { broadcast, call, trimBody } from './api.ts'
 import { groupItems } from './inventory.ts'
 import { push, state, warnLine } from './state.ts'
+import { store, storeNow } from './store.ts'
 import type { Handler, ItemInfo, Target } from './types.ts'
 
 /** Consultas de Baritone que el mod expone como GET y sin argumentos. */
@@ -186,6 +187,8 @@ export const COMMANDS: Record<string, Handler> = {
 	players: async (_args, targets) => broadcast(targets, 'GET', '/players', undefined, 'players'),
 	items,
 	disperse,
+	store,
+	storenow: storeNow,
 	focus: async (args, _targets) => {
 		focus(args)
 	},
@@ -234,6 +237,11 @@ Ordenes (con / delante o escribiendolas tal cual):
                       (el lanzador de instancias ya la pone).
   disperse <x y z r>  Reparte las seleccionadas en un radio de r bloques
                       alrededor de x y z, con un #goto a cada una.
+  store [x y z]       Vuelca el inventario de las seleccionadas en un cofre.
+                      Sin coordenadas, usa el de la config de cada instancia.
+                      Camina con Baritone si el cofre esta lejos, coloca uno si
+                      no hay ninguno, y se desconecta si no puede.
+  storenow            Coloca un cofre donde este cada bot y lo deja.
   connect <servidor>  Conecta a un servidor.
   disconnect          Sale al titulo.
   respawn             Reaparicion.

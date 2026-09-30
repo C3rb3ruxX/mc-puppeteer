@@ -1,5 +1,6 @@
 package com.bonilla.puente.client
 
+import com.bonilla.puente.ChestTarget
 import com.bonilla.puente.ClientStatus
 import com.bonilla.puente.InventorySnapshot
 import com.bonilla.puente.ItemStackInfo
@@ -7,6 +8,8 @@ import com.bonilla.puente.MinecraftBridge
 import com.bonilla.puente.PlayerIdentity
 import com.bonilla.puente.PuenteException
 import com.bonilla.puente.RemotePlayerInfo
+import com.bonilla.puente.StoreRequest
+import com.bonilla.puente.StoreState
 import net.minecraft.SharedConstants
 import net.minecraft.client.Minecraft
 import net.minecraft.client.User
@@ -14,6 +17,7 @@ import net.minecraft.client.gui.screens.ConnectScreen
 import net.minecraft.client.gui.screens.TitleScreen
 import net.minecraft.client.multiplayer.ServerData
 import net.minecraft.client.multiplayer.resolver.ServerAddress
+import net.minecraft.core.BlockPos
 import net.minecraft.core.UUIDUtil
 import net.minecraft.core.registries.BuiltInRegistries
 import net.minecraft.network.chat.Component
@@ -61,6 +65,14 @@ import java.util.Optional
 class ClientBridge(
 	private val modVersion: String,
 	private val logger: Logger,
+	/**
+	 * Cofre de destino de `POST /store` sin coordenadas, leido de la config.
+	 *
+	 * Va aqui y no en la maquina de estados para que [ChestStash] no tenga que
+	 * conocer [com.bonilla.puente.PuenteConfig]: el puente resuelve **que**
+	 * cofre es el destino y le pasa unas coordenadas ya decididas.
+	 */
+	private val chestDeConfig: ChestTarget? = null,
 ) : MinecraftBridge {
 
 	override fun status(): ClientStatus {
@@ -291,6 +303,45 @@ class ClientBridge(
 			if (inWorld) ". Se aplicara en la proxima conexion" else "",
 		)
 		return PlayerIdentity(name = name, uuid = uuid.toString(), appliesOnNextConnect = inWorld)
+	}
+
+	// ------------------------------------------------------------- cofre
+
+	/**
+	 * Encola el volcado y devuelve el estado de inmediato.
+	 *
+	 * Aqui no se ejecuta nada (eso lo hace el tick de [ChestStash]); solo se
+	 * decide **que** cofre es el destino, que es lo unico que depende de quien
+	 * llama:
+	 *
+	 * 1. el que venga en el cuerpo de `POST /store`;
+	 * 2. si no, el `chest` de la config;
+	 * 3. si no, donde este el bot ahora mismo.
+	 *
+	 * `/store/now` va siempre al 3: su sentido es "coloca un cofre aqui y
+	 * dejalo", no "haz lo mismo que `/store` pero sin volcar".
+	 */
+	override fun requestStore(target: ChestTarget?, storeNow: Boolean): StoreState =
+		ChestStash.request(
+			StoreRequest(
+				target = if (storeNow) bloqueDeLosPies() else target ?: chestDeConfig ?: bloqueDeLosPies(),
+				storeNow = storeNow,
+			)
+		)
+
+	override fun storeState(): StoreState = ChestStash.snapshot()
+
+	/**
+	 * El bloque que pisa el bot, como destino de un cofre.
+	 *
+	 * Va por el getter de posicion y no por `BlockPos.containing` sobre las
+	 * coordenadas crudas para que sea el mismo criterio que el que usara el
+	 * tick al colocar.
+	 */
+	private fun bloqueDeLosPies(): ChestTarget? {
+		val player = Minecraft.getInstance().player ?: return null
+		val pos = BlockPos.containing(player.x, player.y, player.z)
+		return ChestTarget(pos.x, pos.y, pos.z)
 	}
 
 	override fun dispose() = Unit

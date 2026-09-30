@@ -1,6 +1,7 @@
 package com.bonilla.puente.client
 
 import com.bonilla.McPuppeteer
+import com.bonilla.puente.ChestTarget
 import com.bonilla.puente.ChatLog
 import com.bonilla.puente.MainThreadBridge
 import com.bonilla.puente.PuenteConfig
@@ -52,7 +53,7 @@ object PuenteClient : ClientModInitializer {
 		}
 
 		val chatLog = ChatLog(config.chatBufferSize)
-		val bridge = ClientBridge(modVersion(), logger)
+		val bridge = ClientBridge(modVersion(), logger, config.chest?.let { ChestTarget(it.x, it.y, it.z) })
 		val controller = PuenteController(
 			bridge = bridge,
 			mainThread = MainThreadBridge(ClientMainThread, config.requestTimeoutMs),
@@ -61,6 +62,10 @@ object PuenteClient : ClientModInitializer {
 		)
 
 		ChatCapture(chatLog).register()
+
+		// Antes de abrir el puerto: desde este momento `/store` y
+		// `/store/now` ya tienen quien las atienda (el tick del cliente).
+		ChestStash.registrar(controller)
 
 		val http = PuenteHttpServer(config, controller, logger)
 		val result = http.start()

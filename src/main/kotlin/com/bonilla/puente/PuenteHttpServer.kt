@@ -245,6 +245,26 @@ class PuenteHttpServer(
 				}
 			}
 
+			// --- Cofre: caminar, colocar y volcar ---------------------------
+			// Los tres son 202/200 porque el trabajo NO ocurre aqui: `POST`
+			// solo deja la peticion en manos del tick del cliente. Por eso el
+			// panel no espera bloqueado, sino que va leyendo `GET /store`.
+			"/store" -> when (exchange.requestMethod) {
+				"GET" -> send(exchange, 200, okBody(controller.storeState().toJson()))
+				"POST" -> {
+					val body = readOptionalJson(exchange)
+					val state = controller.requestStore(storeTarget(body), storeNow = false)
+					send(exchange, 202, okBody(state.toJson()))
+				}
+				else -> methodNotAllowed(exchange, listOf("GET", "POST"))
+			}
+
+			// Sin cuerpo por diseno: coloca un cofre donde este el bot y lo deja.
+			"/store/now" -> {
+				requireMethod(exchange, "POST")
+				send(exchange, 202, okBody(controller.requestStore(null, storeNow = true).toJson()))
+			}
+
 			"/baritone" -> send(exchange, 200, okBody(baritoneIndex()))
 
 			// --- Baritone: consultas por GET ---------------------------------
@@ -359,6 +379,50 @@ class PuenteHttpServer(
 	private fun coords(body: JsonObject): Triple<Int?, Int?, Int?> =
 		Triple(body.optInt("x"), body.optInt("y"), body.optInt("z"))
 
+	/**
+	 * Cuerpo opcional: los endpoints que admiten `{}` o nada.
+	 *
+	 * A diferencia de [readJson], un cuerpo vacio **no** es un error: es la
+	 * forma normal de pedir "el cofre de la config, o donde este el bot".
+	 */
+	private fun readOptionalJson(exchange: HttpExchange): JsonObject {
+		val raw = readBody(exchange)
+		if (raw.isBlank()) return JsonObject()
+		return Json.parse(raw)
+	}
+
+	/**
+	 * Cofre pedido en el cuerpo de `POST /store`, o `null` si no vienen.
+	 *
+	 * Las tres coordenadas van juntas o no van: un `x` suelto es un error
+	 * del cliente y se dice, en vez de elegir por el cuenta donde lo que
+	 * falta. Los limites son los del mundo (ver `PuenteConfig.MIN_X`), que
+	 * es donde el servidor ya no responde; por debajo de eso es culpa de la
+	 * peticion y se rechaza con `400` en vez de ir a caminar para nada.
+	 */
+	private fun storeTarget(body: JsonObject): ChestTarget? {
+		val x = body.optInt("x")
+		val y = body.optInt("y")
+		val z = body.optInt("z")
+		if (x == null && y == null && z == null) return null
+		if (x == null || y == null || z == null) {
+			throw HttpError(400, "missing_field", "el cofre necesita 'x', 'y' y 'z' juntos")
+		}
+		if (x !in PuenteConfig.MIN_X..PuenteConfig.MAX_X || z !in PuenteConfig.MIN_X..PuenteConfig.MAX_X) {
+			throw HttpError(
+				400, "invalid_field",
+				"'x' y 'z' estan fuera del mundo (${PuenteConfig.MIN_X}..${PuenteConfig.MAX_X}): $x, $z",
+			)
+		}
+		if (y !in PuenteConfig.MIN_Y..PuenteConfig.MAX_Y) {
+			throw HttpError(
+				400, "invalid_field",
+				"'y' esta fuera de rango (${PuenteConfig.MIN_Y}..${PuenteConfig.MAX_Y}): $y",
+			)
+		}
+		return ChestTarget(x, y, z)
+	}
+
 	private fun origin(body: JsonObject): Triple<Int, Int, Int>? {
 		val x = body.optInt("x") ?: return null
 		val y = body.optInt("y") ?: return null
@@ -409,6 +473,12 @@ class PuenteHttpServer(
 			add("POST $BASE_PATH/command   { \"command\": \"list\" }   (sin barra)")
 			add("POST $BASE_PATH/connect   { \"address\": \"host:puerto\" }")
 			add("POST $BASE_PATH/disconnect")
+			add("POST $BASE_PATH/respawn")
+			add("GET  $BASE_PATH/profile")
+			add("POST $BASE_PATH/profile   { \"name\": \"Tester1\" }")
+			add("POST $BASE_PATH/store     { \"x\":10, \"y\":-60, \"z\":4 }   (cuerpo opcional)")
+			add("POST $BASE_PATH/store/now")
+			add("GET  $BASE_PATH/store")
 		})
 	}
 

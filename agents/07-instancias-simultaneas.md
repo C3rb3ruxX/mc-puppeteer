@@ -138,7 +138,7 @@ mc-puppeteer · 3 instancia(s), 3 viva(s) · cada 2s · 23:52:02
 > @1,3 cmd list
 ──────────────────────────────────────────────────────────────────────────────
 >
-/say /cmd /baritone /disperse /items /focus /every /scan /sel /quit · @1,3 · 1-9 · Q
+/say /cmd /baritone /disperse /store /storenow /connect /items /focus /every /sel /quit · @1,3 · 1-9 · Q
 ```
 
 - **Izquierda**: una fila por instancia. Las columnas se eligen segun el ancho
@@ -177,6 +177,7 @@ Todo lo demas esta en `scripts/tui/`, para editar una cosa sin releer 1600 linea
 | `inventory.ts` | panel derecho: suma por tipo de item y las dibuja |
 | `view.ts` | el compositor: reparte el ancho, monta las tres zonas y pinta |
 | `commands.ts` | las ordenes y el `/help` |
+| `store.ts` | `store` y `storenow`: manda la orden y va leyendo el estado |
 | `panel.ts` | lo que pasa al escribir o al pulsar una tecla |
 
 Para cambiar el aspecto del panel basta con tocar dos sitios: las constantes de
@@ -198,8 +199,8 @@ umbral minimo en `NEEDS_GAUGES` / `NEEDS_POS` / `NEEDS_LATENCY`).
 Ordenes: `say`/`chat`, `cmd`, `connect`, `disconnect`, `respawn`, `profile`,
 `status`, `health`, `players`, `items`, `history [n]`, `baritone`, `disperse`,
 mas las del panel: `every <seg>`, `scan`, `token <t>`, `sel <n|all|none>`,
-`log <n> [mcN]`, `focus <n|nombre>`, `target`, `clear`, `help`, `quit`. Con `/`
-delante o tal cual.
+`log <n> [mcN]`, `focus <n|nombre>`, `store [x y z]`, `storenow`, `target`,
+`clear`, `help`, `quit`. Con `/` delante o tal cual.
 
 `baritone` usa el endpoint propio (`GET /baritone/version`, `/proc`, `/eta`,
 `/modified`, `/paused`, `/wp`, `/gc`) y para todo lo demando manda la orden por
@@ -255,6 +256,48 @@ disperse -> 3 instancia(s) en 30 bloques alrededor de 0 64 0
   algo falla, avisa y no manda nada.
 - Funciona con el prefijo de destino como cualquier otra orden: sin prefijo, a las
   seleccionadas; `@all`, a todas.
+
+### `store [x y z]` y `storenow`
+
+`store` vuelca el inventario de las seleccionadas en un cofre; `storenow`
+coloca un cofre donde este cada bot y lo deja, sin volcar nada.
+
+```
+> @1,2 storenow
+  mc1    aceptado (202); esperando...
+  mc1    colocando el cofre
+  mc1    hecho: 0 unidad(es) al cofre
+
+> store 10 -60 4
+  mc2    aceptado (202); esperando...
+  mc2    caminando al cofre
+  mc2   abriendo el cofre
+  mc2    vaciando el inventario
+  mc2    hecho: 431 unidad(es) al cofre
+```
+
+- No es una llamada y se acabó: el mod la ejecuta durante varios ticks y
+  devuelve **202** al momento. El panel va leyendo `GET /store` y escribe una
+  linea **cada vez que el estado cambia** (`caminando`, `colocando`, `abriendo`,
+  `vaciando`, `hecho`, `fallo`), no en cada consulta.
+- El cofre es el de las coordenadas que se pasen; sin coordenadas, el de la
+  config de cada instancia (`chest` en su `config/mc-puppeteer.json`); sin eso,
+  donde este el bot.
+- **Camina con Baritone** si el cofre esta a mas de 4 bloques, asi que el
+  `store` de verdad necesita `PUPPETEER_BARITONE_ASYNC=1` (el lanzador ya la
+  pone). Distancia maxima 64 bloques y 120 s de espera.
+- Si en el destino no hay cofre, **coloca uno**, y para eso el bot necesita
+  tener un cofre **en la barra rapida** (ranuras 0-8, no solo en el inventario:
+  solo se puede colocar con la ranura seleccionada, y un cofre mas alla no se
+  saca). Si no puede (no tiene, no esta en la barra rapida, no se puede colocar,
+  no se abre, o se agota la espera), **se desconecta** y el motivo sale en el
+  feed: un bot atascado en un servidor de farm estorba mas que uno que se va.
+- Vuelca las **36 ranuras del inventario**. La armadura (ranuras 36-39) y la mano
+  secundaria (40) **no se pueden guardar**: en vanilla no caben en un cofre, y
+  mandar esas ranuras al menu revienta. El bot se los queda puestos. Para
+  desatarse hay que hacerlo a mano con `/item replace`.
+- El panel espera 150 s para `store` y 30 s para `storenow`. Si se agotan, avisa
+  y deja de preguntar, pero **el mod sigue a lo suyo**: no se cancela nada.
 
 ### Teclas
 

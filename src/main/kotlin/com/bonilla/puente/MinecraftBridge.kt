@@ -1,6 +1,7 @@
 package com.bonilla.puente
 
 import com.google.gson.JsonArray
+import com.google.gson.JsonNull
 import com.google.gson.JsonObject
 
 /**
@@ -83,6 +84,24 @@ interface MinecraftBridge {
 	 * conectar. Ver [PlayerIdentity.appliesOnNextConnect].
 	 */
 	fun setPlayerName(name: String): PlayerIdentity
+
+	/**
+	 * Encola un volcado de inventario en un cofre (o solo la colocacion) y
+	 * devuelve el estado en el que queda la peticion.
+	 *
+	 * El trabajo lo hace el **tick** del cliente, no esta llamada: aqui solo se
+	 * guarda la peticion. Por eso responde al instante con `202` en HTTP y el
+	 * llamante tiene que seguir el progreso con [storeState].
+	 *
+	 * @param target cofre pedido. `null` significa "donde este el bot", que es
+	 * lo que se usa cuando no hay ni coordenadas ni cofre en la config.
+	 * @param storeNow `true` = solo colocar el cofre y dejarlo ahi, sin volcar
+	 * nada dentro ([StoreState.stored] se queda a 0).
+	 */
+	fun requestStore(target: ChestTarget?, storeNow: Boolean): StoreState
+
+	/** Estado del volcado en curso, sin encolar nada nuevo. */
+	fun storeState(): StoreState
 
 	/** Libera recursos del lado del cliente. */
 	fun dispose()
@@ -223,6 +242,83 @@ data class RemotePlayerInfo(
 		addProperty("displayName", displayName)
 	}
 }
+
+// ------------------------------------------------------------------ cofre
+
+/**
+ * Fases por las que pasa un volcado de inventario a un cofre.
+ *
+ * Van en minuscula en el JSON (`walking`, `placing`, ...) porque es lo que
+ * consume el panel; aqui se escriben en mayusculas por estilo de Kotlin.
+ * `IDLE` es el estado de reposo (nunca se ha pedido nada), `DONE` y `FAILED` son
+ * terminales.
+ */
+enum class StorePhase { IDLE, WALKING, PLACING, OPENING, STORING, DONE, FAILED }
+
+/** Posicion de un cofre, en coordenadas de bloque. */
+data class ChestTarget(
+	val x: Int,
+	val y: Int,
+	val z: Int,
+) {
+	fun toJson(): JsonObject = JsonObject().apply {
+		addProperty("x", x)
+		addProperty("y", y)
+		addProperty("z", z)
+	}
+}
+
+/**
+ * Estado del volcado en un instante dado.
+ *
+ * Es la forma exacta que consumen `/store`, `/store/now` y el estado que
+ * devuelve el panel, asi que los nombres de aqui son los del contrato y no se
+ * tocan.
+ *
+ * @param target bloque donde esta (o donde va a estar) el cofre. `null` si
+ * todavia no se ha decidido, por ejemplo antes de arrancar el trabajo.
+ * @param moved `true` si el bot ha tenido que caminar para llegar.
+ * @param placed `true` si el cofre lo ha puesto esta operacion.
+ * @param stored unidades metidas en el cofre. Se cuenta comparando el
+ * inventario antes y despues, que es lo unico fiable: un shift+click deja
+ * parte en el cofre si ya estaba casi lleno.
+ * @param reason motivo en espanol, **solo** si la fase es [StorePhase.FAILED].
+ */
+data class StoreState(
+	val phase: StorePhase,
+	val target: ChestTarget? = null,
+	val moved: Boolean = false,
+	val placed: Boolean = false,
+	val stored: Int = 0,
+	val reason: String? = null,
+) {
+	fun toJson(): JsonObject = JsonObject().apply {
+		addProperty("state", phase.name.lowercase())
+		// `JsonNull` explicito en vez de `addProperty`: el contrato pide que
+		// `target` y `reason` salgan siempre, como `null` si no tocaba.
+		if (target == null) add("target", JsonNull.INSTANCE) else add("target", target.toJson())
+		addProperty("moved", moved)
+		addProperty("placed", placed)
+		addProperty("stored", stored)
+		if (reason == null) add("reason", JsonNull.INSTANCE) else addProperty("reason", reason)
+	}
+
+	companion object {
+		/** Estado inicial: no se ha pedido ningun volcado. */
+		val IDLE: StoreState = StoreState(StorePhase.IDLE)
+	}
+}
+
+/**
+ * Peticion de volcado pendiente de que la atienda el tick.
+ *
+ * Vive en el modulo comun porque es el punto de union entre el hilo HTTP (que
+ * solo escribe) y el tick del cliente (que la lee y ejecuta).
+ */
+data class StoreRequest(
+	val target: ChestTarget?,
+	val storeNow: Boolean,
+)
 
 /** Mensaje capturado en el hilo principal, publicado de forma inmutable. */
 data class CapturedMessage(

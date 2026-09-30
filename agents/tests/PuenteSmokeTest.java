@@ -126,6 +126,19 @@ public class PuenteSmokeTest {
 				profileUuid = "uuid-" + name;
 				return new PlayerIdentity(profileName, profileUuid, inWorld.get());
 			}
+			@Override public StoreState requestStore(ChestTarget target, boolean storeNow) {
+				onMainThreadCalls.incrementAndGet();
+				checkOnMain("requestStore");
+				// La maquina de estados vive en el cliente (fuera de este banco),
+				// asi que aqui solo se comprueba que el puente recibe la orden
+				// y devuelve un estado con la forma del contrato.
+				return new StoreState(StorePhase.WALKING, target, false, false, 0, null);
+			}
+			@Override public StoreState storeState() {
+				onMainThreadCalls.incrementAndGet();
+				checkOnMain("storeState");
+				return new StoreState(StorePhase.IDLE, null, false, false, 0, null);
+			}
 			@Override public void dispose() {}
 		};
 
