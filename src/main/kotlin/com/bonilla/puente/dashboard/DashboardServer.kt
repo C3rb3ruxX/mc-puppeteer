@@ -67,6 +67,11 @@ class DashboardServer @JvmOverloads constructor(
 		Thread(r, "dashboard-probe").apply { isDaemon = true }
 	}
 
+	/** Broadcasts use a separate pool so probes cannot serialize commands to instances. */
+	private val broadcastThreads = Executors.newCachedThreadPool { r ->
+		Thread(r, "dashboard-broadcast").apply { isDaemon = true }
+	}
+
 	private val httpThreads = Executors.newFixedThreadPool(8) { r ->
 		Thread(r, "dashboard-http").apply { isDaemon = true }
 	}
@@ -99,6 +104,7 @@ class DashboardServer @JvmOverloads constructor(
 		launcher.stopAll()
 		server?.stop(0)
 		prober.shutdownNow()
+		broadcastThreads.shutdownNow()
 		httpThreads.shutdownNow()
 	}
 
@@ -250,18 +256,21 @@ class DashboardServer @JvmOverloads constructor(
 		// Todas en paralelo y con el mismo techo que el proxy: una instancia
 		// colgada no puede retrasar al resto del broadcast.
 		val futures = targets.map { instance ->
-			prober.submit<JsonObject> { broadcastOne(instance, method, tail, query, body, contentType) }
+			instance to broadcastThreads.submit<JsonObject> {
+				broadcastOne(instance, method, tail, query, body, contentType)
+			}
 		}
 
 		val results = JsonArray()
 		var sent = 0
 		var failed = 0
-		futures.forEach { future ->
+		futures.forEach { (instance, future) ->
 			val entry = try {
 				future.get(PROXY_TIMEOUT_MS + 500, TimeUnit.MILLISECONDS)
 			} catch (e: Exception) {
 				Json.obj().apply {
-					addProperty("id", "?")
+					addProperty("id", instance.id)
+					addProperty("name", instance.name)
 					addProperty("ok", false)
 					addProperty("error", "sin respuesta en ${PROXY_TIMEOUT_MS}ms")
 				}

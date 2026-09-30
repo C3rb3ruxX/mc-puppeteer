@@ -977,27 +977,43 @@ async function stopInstance(id) {
 /** Lanza una instancia nueva en el puerto escrito en la barra. */
 async function launchInstance() {
   const raw = el("newPort").value.trim();
-  if (!raw) return;
-  const port = parseInt(raw, 10);
-
-  el("btnLaunch").disabled = true;
-  el("launchInfo").textContent = `arrancando ${port}â€¦`;
-  const res = await api("/api/launch", {
-    method: "POST",
-    body: JSON.stringify({ port, name: `Instancia ${port}` }),
-  });
-
-  if (res.status === 200 && res.body.data && res.body.data.started) {
-    el("launchInfo").textContent = `âœ“ ${port} arrancada (pid ${res.body.data.pid})`;
-    el("newPort").value = "";
-    toast(`instancia ${port} arrancada (pid ${res.body.data.pid})`, "ok");
-  } else {
-    const e = res.body && res.body.error;
-    el("launchInfo").textContent = `âœ— ${e ? e.message : "HTTP " + res.status}`;
-    toast(e ? e.message : "HTTP " + res.status, "err");
+  const from = parseInt(el("newPort").min, 10) || 25580;
+  const to = parseInt(el("newPort").max, 10) || 25599;
+  const occupied = new Set(state.instances.filter(i => i.online).map(i => i.port));
+  const port = raw ? parseInt(raw, 10) : Array.from({ length: to - from + 1 }, (_, n) => from + n)
+    .find(p => !occupied.has(p));
+  if (!Number.isInteger(port) || port < from || port > to) {
+    toast(raw ? `puerto fuera de rango (${from}-${to})` : `no hay puertos libres (${from}-${to})`, "err");
+    return;
   }
-  el("btnLaunch").disabled = false;
-  poll();
+
+  const launchButtons = [...document.querySelectorAll("[data-all='launch']"), el("btnLaunch")]
+    .map(button => [button, button.disabled]);
+  launchButtons.forEach(([button]) => button.disabled = true);
+  el("launchInfo").textContent = `arrancando ${port}â€¦`;
+  try {
+    const res = await api("/api/launch", {
+      method: "POST",
+      body: JSON.stringify({ port, name: `Instancia ${port}` }),
+    });
+
+    if (res.status === 200 && res.body.data && res.body.data.started) {
+      el("launchInfo").textContent = `âœ“ ${port} arrancada (pid ${res.body.data.pid})`;
+      el("newPort").value = "";
+      toast(`instancia ${port} arrancada (pid ${res.body.data.pid})`, "ok");
+    } else {
+      const e = res.body && res.body.error;
+      el("launchInfo").textContent = `âœ— ${e ? e.message : "HTTP " + res.status}`;
+      toast(e ? e.message : "HTTP " + res.status, "err");
+    }
+  } catch (e) {
+    const message = e.message || "no se pudo conectar con el Dashboard";
+    el("launchInfo").textContent = `âœ— ${message}`;
+    toast(message, "err");
+  } finally {
+    launchButtons.forEach(([button, wasDisabled]) => button.disabled = wasDisabled);
+    poll();
+  }
 }
 
 /** Registra las instancias que ya estaban vivas y no venian del panel. */
@@ -1191,10 +1207,17 @@ async function broadcastAll() {
   el("hubInfo").textContent = `enviando a ${destinos.length}â€¦`;
 
   let res;
-  if (el("bcTarget").value === "all") {
-    res = await api(`/api/broadcast${ruta}`, { method, body });
-  } else {
-    res = await apiPorInstancia(destinos, ruta, method, body);
+  try {
+    if (el("bcTarget").value === "all") {
+      res = await api(`/api/broadcast${ruta}`, { method, body });
+    } else {
+      res = await apiPorInstancia(destinos, ruta, method, body);
+    }
+  } catch (e) {
+    const msg = e.message || "fallo de red al enviar";
+    el("hubInfo").textContent = `âœ— ${msg}`;
+    toast(msg, "err");
+    return;
   }
 
   const d = res.body && res.body.data;
@@ -1225,7 +1248,7 @@ async function apiPorInstancia(ids, path, method, body) {
   const results = await Promise.all(ids.map(async id => {
     const res = await api(`/api/instances/${id}${path}`, { method, body });
     const inst = state.instances.find(i => i.id === id);
-    if (res.status === 200) {
+    if (res.status >= 200 && res.status < 300) {
       return { id, name: inst ? inst.name : id, ok: true, status: res.status, body: res.body && res.body.data };
     }
     const e = res.body && res.body.error;
@@ -1255,6 +1278,7 @@ async function refreshLauncher() {
   if (res.status !== 200 || !d) return;
   const info = el("launchInfo");
   el("btnLaunch").disabled = !d.ready;
+  document.querySelectorAll("[data-all='launch']").forEach(button => button.disabled = !d.ready);
   if (!d.ready) {
     info.textContent = "sin compilar: ejecuta ./gradlew build";
   } else if (!info.textContent.startsWith("âœ“") && !info.textContent.startsWith("âœ—")) {
