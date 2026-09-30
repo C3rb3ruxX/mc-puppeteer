@@ -52,9 +52,12 @@ const splitPanes = (cols: number): [number, number] | null => {
 /** El titulo de la zona de instancias. */
 const titleTable = (): string => 'instancias'
 
-/** El titulo de la zona de inventario, con el bot en el foco. */
-const titleInventory = (target: Target | null): string =>
-	target ? `inventario · ${target.name}` : 'inventario'
+/**
+ * El titulo del panel derecho. Sin foco es la suma de todas, que es la vista
+ * normal; con foco, se esta mirando una en concreto.
+ */
+const titleInventory = (focus: Target | null): string =>
+	focus ? `inventario · ${focus.name}` : 'inventario · todos'
 
 /**
  * Cuantas filas de contenido caben arriba. El minimo de 8 es para que la lista
@@ -85,7 +88,11 @@ export const render = (): string => {
 	const panes = splitPanes(cols)
 
 	const targets = state.targets
-	const focus = targets[Math.min(state.focus, Math.max(0, targets.length - 1))] ?? null
+	// `state.focus === null` es la vista global: el panel derecho suma todas.
+	const focus =
+		state.focus === null
+			? null
+			: (targets[Math.min(state.focus, Math.max(0, targets.length - 1))] ?? null)
 	const content = contentRows(rows, targets)
 
 	const alive = targets.filter(t => t.up).length
@@ -100,32 +107,32 @@ export const render = (): string => {
 		const head =
 			`┌ ${pad(titleTable(), leftW - 2)} ` +
 			`┬ ${pad(titleInventory(focus), rightW - 2)} ┐`
-		lines.push(paint(head, c.grey))
+		lines.push(paint(head, c.frame))
 
 		const left = renderTable(targets, leftW - 2, content, state.focus)
-		const right = renderInventory(focus, rightW - 2, content)
+		const right = renderInventory(targets, focus, rightW - 2, content)
 		for (let i = 0; i < content; i++) {
 			lines.push(
-				`${paint('│', c.grey)} ${pad(left[i] ?? '', leftW - 2)} ` +
-					`${paint('│', c.grey)} ${pad(right[i] ?? '', rightW - 2)} ${paint('│', c.grey)}`,
+				`${paint('│', c.frame)} ${pad(left[i] ?? '', leftW - 2)} ` +
+					`${paint('│', c.frame)} ${pad(right[i] ?? '', rightW - 2)} ${paint('│', c.frame)}`,
 			)
 		}
 		lines.push(
-			paint(`└${'─'.repeat(leftW - 1)}┴${'─'.repeat(rightW - 1)}┘`, c.grey),
+			paint(`└${'─'.repeat(leftW - 1)}┴${'─'.repeat(rightW - 1)}┘`, c.frame),
 		)
 	} else {
-		lines.push(paint(`┌ ${pad(titleTable(), cols - 4)} ┐`, c.grey))
+		lines.push(paint(`┌ ${pad(titleTable(), cols - 4)} ┐`, c.frame))
 		for (const line of renderTable(targets, cols - 4, content, state.focus)) {
-			lines.push(`${paint('│', c.grey)} ${pad(line, cols - 4)} ${paint('│', c.grey)}`)
+			lines.push(`${paint('│', c.frame)} ${pad(line, cols - 4)} ${paint('│', c.frame)}`)
 		}
-		lines.push(paint(`└${'─'.repeat(cols - 2)}┘`, c.grey))
+		lines.push(paint(`└${'─'.repeat(cols - 2)}┘`, c.frame))
 	}
 
 	// ---- zona del medio: el feed.
 	const feedHeight = Math.max(2, rows - lines.length - 4)
-	lines.push(paint('─'.repeat(cols), c.grey))
+	lines.push(paint('─'.repeat(cols), c.frame))
 	for (const line of renderFeed(cols, feedHeight)) lines.push(line)
-	lines.push(paint('─'.repeat(cols), c.grey))
+	lines.push(paint('─'.repeat(cols), c.frame))
 
 	// ---- zona de abajo: la linea de ordenes y el recordatorio.
 	lines.push(`${paint('>', c.green)} ${state.input}`)

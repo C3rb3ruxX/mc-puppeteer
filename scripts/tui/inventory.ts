@@ -1,9 +1,13 @@
 /**
- * inventory.ts — el panel de la derecha: que lleva el bot, de mas a menos.
+ * inventory.ts — el panel de la derecha: que llevan los bots, de mas a menos.
+ *
+ * Por defecto es la **suma de todas las instancias**: lo que se quiere ver de un
+ * vistazo es cuanto hay entre todos. Con `focus <n>` se mira una sola, que es
+ * cuando hace falta saber de quien es cada cosa.
  *
  * El mod expone `GET /inventory` con una entrada por ranura ocupada; aqui se
  * suma por tipo de item y se ordena por cantidad. Las barras van escaladas al
- * item mas numeroso de esa instancia, para que se comparen de un vistazo.
+ * item mas numeroso de lo que se esta mirando, para que se comparen de un vistazo.
  */
 
 import { bar, c, paint, pad } from './ansi.ts'
@@ -26,6 +30,26 @@ export const groupItems = (items: ItemInfo[]): ItemRow[] => {
 	return [...grouped.values()].sort((a, b) => b.count - a.count)
 }
 
+/**
+ * Suma los inventarios de varias instancias por tipo de item. Los ids se
+ * combinan porque es la misma partida para todos, asi que dos bots con 60 de
+ * roble son 120 de roble; si interesa ver quien lleva cada cosa, para eso esta
+ * `focus`.
+ */
+export const sumInventories = (targets: Target[]): ItemRow[] => {
+	const grouped = new Map<string, ItemRow>()
+	for (const target of targets) {
+		for (const item of target.inventory ?? []) {
+			const id = String(item.id ?? '?')
+			const count = Number(item.count) || 0
+			const prev = grouped.get(id)
+			if (prev) prev.count += count
+			else grouped.set(id, { id, name: String(item.name ?? ''), count })
+		}
+	}
+	return [...grouped.values()].sort((a, b) => b.count - a.count)
+}
+
 /** Lee el inventario de una instancia y lo deja en el target para dibujarlo. */
 export const fetchInventory = async (target: Target): Promise<void> => {
 	const reply = await call(target, 'GET', '/inventory', undefined, 3000)
@@ -44,29 +68,43 @@ export const fetchInventory = async (target: Target): Promise<void> => {
 	}
 }
 
-/** Las lineas del panel de inventario, ya con la anchura del panel. */
+/**
+ * Las lineas del panel de inventario, ya con la anchura del panel.
+ *
+ * `focus` es la instancia a la que se mira, o `null` para la suma de todas las
+ * que estan vivas. Las caidas se tratan aparte: si ninguna contesta sale el
+ * error, y si contestan algunas se suman esas y se avisa de quantas no.
+ */
 export const renderInventory = (
-	target: Target | null,
+	targets: Target[],
+	focus: Target | null,
 	width: number,
 	height: number,
 ): string[] => {
-	if (!target) return [paint('  sin instancias', c.dim)]
+	const vivas = targets.filter(t => t.up)
+	if (vivas.length === 0) return [paint('  sin instancias vivas', c.dim)]
 
-	if (target.inventoryError !== null) {
-		const detalle = target.inventoryError
+	// Sin foco se suma todo lo vivo; con foco, solo esa instancia.
+	const espejo = focus ? [focus] : vivas
+	const conDatos = espejo.filter(t => t.inventory !== null)
+	const roto = espejo.find(t => t.inventoryError !== null)
+
+	if (conDatos.length === 0) {
+		const detalle = (roto?.inventoryError ?? 'sin inventario')
 			.replace(/\s+/g, ' ')
 			.slice(0, width - 8)
+		const donde = focus ? ` en el mod de ${focus.name}` : ' en el mod'
 		return [
 			paint('  sin inventario', c.yellow),
 			`  ${paint(detalle, c.dim)}`,
-			paint(`  (falta el endpoint /inventory en el mod de ${target.name})`, c.dim),
+			paint(`  (falta el endpoint /inventory${donde})`, c.dim),
 		]
 	}
-	if (target.inventory === null) return [paint('  leyendo inventario...', c.dim)]
 
-	const rows = groupItems(target.inventory)
+	const quien = focus ? focus.name : `${conDatos.length} bot(s)`
+	const rows = sumInventories(conDatos)
 	if (rows.length === 0) {
-		return [paint(`  ${target.name}: inventario vacio`, c.dim)]
+		return [paint(`  ${quien}: inventario vacio`, c.dim)]
 	}
 
 	const units = rows.reduce((sum, row) => sum + row.count, 0)
@@ -77,6 +115,14 @@ export const renderInventory = (
 	const lines: string[] = [
 		paint(`  ${rows.length} tipo(s), ${units} unidad(es)`, c.dim),
 	]
+	// Solo en la vista global: cuantos bots se han sumado y quantos no han
+	// contestado, para que una cifra incompleta no parezca la real.
+	if (!focus) {
+		const extras: string[] = [`${conDatos.length} bots`]
+		if (conDatos.length < vivas.length) extras.push(`${vivas.length - conDatos.length} sin datos`)
+		lines.push(paint(`  ${extras.join(' · ')}`, c.dim))
+	}
+
 	const room = Math.max(1, height - lines.length - 1)
 	for (const row of rows.slice(0, room)) {
 		// Cantidad a la izquierda (como se lee de un parte de recogida), nombre y barra.

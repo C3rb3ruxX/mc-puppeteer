@@ -127,7 +127,7 @@ const tick = async (): Promise<void> => {
 	try {
 		await refresh(state.targets)
 		await pullChat(state.targets)
-		await pullInventory()
+		await pullInventory(state.targets)
 	} finally {
 		ticking = false
 	}

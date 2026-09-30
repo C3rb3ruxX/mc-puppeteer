@@ -125,12 +125,12 @@ El panel tiene tres zonas:
 
 ```
 mc-puppeteer · 3 instancia(s), 3 viva(s) · cada 2s · 23:52:02
-┌ instancias                               ┬ inventario · mc1                    ┐
+┌ instancias                               ┬ inventario · todos                   ┐
 │     inst  puerto estado mundo dim jug    │   7 tipo(s), 343 unidad(es)        │
-│ > ● mc1   25580  srv1   mundo sobre 1/20 │   126   Tronco de roble  ████████   │
-│   ● mc2   25581  srv2   mundo sobre 2/20 │    95   Adoquín          ██████░░   │
-│   ● mc3   25582  srv3   mundo sobre 3/20 │    63   Antorcha         ████░░░░░   │
-│     vida        comida     pos   fps  ms │    40   Tierra           ███░░░░░░░   │
+│   ● mc1   25580  srv1   mundo sobre 1/20 │   3 bots · 1 sin datos              │
+│   ● mc2   25581  srv2   mundo sobre 2/20 │   126   Tronco de roble  ████████   │
+│   ● mc3   25582  srv3   mundo sobre 3/20 │    95   Adoquín          ██████░░   │
+│     vida        comida     pos   fps  ms │    63   Antorcha         ████░░░░░   │
 └──────────────────────────────────────────┴─────────────────────────────────────┘
 ──────────────────────────────────────────────────────────────────────────────
   mc3    <mc2> prueba final
@@ -146,12 +146,18 @@ mc-puppeteer · 3 instancia(s), 3 viva(s) · cada 2s · 23:52:02
   jugadores) y despues, si sobra, vida, comida y posicion; fps y latencia son lo
   ultimo que entra y lo primero que se cae. Con una terminal demasiado estrecha
   el inventario desaparece y la tabla se queda con todo el ancho.
-- El `>` de la izquierda marca el **foco**: la instancia cuyo inventario se mira
-  al lado. Se cambia con `focus <n|nombre>` o con la tecla `f`.
-- **Derecha**: que lleva el bot del foco, de mas a menos, con la cantidad a la
-  izquierda, el nombre y una barra escalada al item mas numeroso. Sale de
-  `GET /inventory`, que se pide solo para la instancia del foco: son hasta 41
-  ranuras y no hace falta traerlas de todas en cada refresco.
+- **Derecha**: el inventario **de todos los bots, sumado**, de mas a menos: lo
+  que se quiere ver de un vistazo es cuanto hay entre todos. Va con la cantidad a
+  la izquierda, el nombre y una barra escalada al item mas numeroso de lo que se
+  esta mirando. Sale de `GET /inventory`, que se pide a todas las instancias
+  vivas en cada refresco (en paralelo; son solo las ranuras ocupadas).
+  La segunda linea dice cuantos bots se han sumado y, si alguno no ha
+  contestado, cuantos faltan, para que una cifra incompleta no parezca la real.
+- **Foco**: `focus <n|nombre>` estrecha el panel derecho a una sola instancia,
+  que es cuando hace falta saber de quien es cada cosa. La tabla marca con `>` la
+  que esta enfocada y el titulo pasa a `inventario · mc2`. Sin foco el titulo es
+  `inventario · todos`. Se vuelve a la suma con `focus all`, y `f` (o
+  `focus next`) recorre las instancias y da la vuelta a la global.
 - Abajo: el `feed`, con el chat de todas mezclado y las respuestas a las ordenes.
   Se lee de `/chat/history` **sin vaciar los buffers** del mod: se recuerda la
   marca de tiempo del ultimo mensaje y solo se pinta lo posterior. Al abrir el
@@ -167,14 +173,14 @@ Todo lo demas esta en `scripts/tui/`, para editar una cosa sin releer 1600 linea
 
 | Modulo | Que hace |
 |---|---|
-| `ansi.ts` | colores, ancho **visible** (los codigos de color no ocupan columnas) y barras |
+| `ansi.ts` | colores (`frame` es el azul claro de los marcos, no el gris: hay temas que pintan el gris de negro), ancho **visible** (los codigos de color no ocupan columnas) y barras |
 | `types.ts` | los tipos compartidos |
 | `state.ts` | estado, feed y ganchos hacia el arranque |
 | `api.ts` | llamadas HTTP al mod, con tiempo limite |
 | `targets.ts` | descubrimiento de instancias y destinos (`@1,3`) |
 | `poll.ts` | lo que se pregunta en cada refresco (`/status`, chat, inventario) |
 | `table.ts` | panel izquierdo: que columnas hay, cuanto ocupa cada una y las filas |
-| `inventory.ts` | panel derecho: suma por tipo de item y las dibuja |
+| `inventory.ts` | panel derecho: suma los inventarios de todos los bots por tipo de item y las dibuja |
 | `view.ts` | el compositor: reparte el ancho, monta las tres zonas y pinta |
 | `commands.ts` | las ordenes y el `/help` |
 | `store.ts` | `store` y `storenow`: manda la orden y va leyendo el estado |
@@ -199,7 +205,7 @@ umbral minimo en `NEEDS_GAUGES` / `NEEDS_POS` / `NEEDS_LATENCY`).
 Ordenes: `say`/`chat`, `cmd`, `connect`, `disconnect`, `respawn`, `profile`,
 `status`, `health`, `players`, `items`, `history [n]`, `baritone`, `disperse`,
 mas las del panel: `every <seg>`, `scan`, `token <t>`, `sel <n|all|none>`,
-`log <n> [mcN]`, `focus <n|nombre>`, `store [x y z]`, `storenow`, `target`,
+`log <n> [mcN]`, `focus <n|nombre|all>`, `store [x y z]`, `storenow`, `target`,
 `clear`, `help`, `quit`. Con `/` delante o tal cual.
 
 `baritone` usa el endpoint propio (`GET /baritone/version`, `/proc`, `/eta`,
@@ -224,10 +230,11 @@ Los nombres son los que trae el juego ya traducidos (`stack.hoverName.string`), 
 el id. Si el mod no expone `/inventory`, el panel lo dice en vez de fallar en
 silencio: sale `sin inventario` con el motivo debajo en el panel de la derecha.
 
-`focus <n|nombre>` elige que instancia mira el panel de la derecha; `focus next`
-rota y `focus first` vuelve a la primera. La tecla `f` hace lo mismo que
-`focus next`. El inventario del foco se refresca solo en cada ciclo, asi que no
-hay que pedirlo a mano.
+`focus <n|nombre>` deja de sumar y mira el inventario de una sola instancia (el
+titulo pasa a `inventario · mc2` y la tabla la marca con `>`); `focus all` vuelve
+a la suma de todas. `focus next` rota y al dar la vuelta entera regresa a la
+global, que es tambien lo que hace la tecla `f`. Los inventarios se piden a todos
+los bots en cada ciclo, asi que cambiar de vista no cuesta nada.
 
 ### `disperse <x> <y> <z> <radio>`
 
@@ -302,10 +309,11 @@ coloca un cofre donde este cada bot y lo deja, sin volcar nada.
 ### Teclas
 
 Con la linea **vacia**: `1`-`9` seleccionan, `a` todas, `n` ninguna,
-`r` refresca, `l` ultimas lineas del log, `f` cambia el foco del inventario,
-`Q` sale. `Ctrl-C` o `Esc` salen siempre. Flechas y `RePag`/`AvPag` recorren el
-feed. Escribiendo texto, todas las teclas van al texto (por eso `q` no sale:
-`Q` si, para poder mandar `quieto` por chat).
+`r` refresca, `l` ultimas lineas del log, `f` recorre el foco del inventario (y
+vuelve a la suma de todos al dar la vuelta), `Q` sale. `Ctrl-C` o `Esc` salen
+siempre. Flechas y `RePag`/`AvPag` recorren el feed. Escribiendo texto, todas las
+teclas van al texto (por eso `q` no sale: `Q` si, para poder mandar `quieto` por
+chat).
 
 Un detalle que no es evidente: los atajos de una tecla **solo** funcionan con la
 linea vacia. Si no, estarian pisando el texto que se esta escribiendo, y `n` o

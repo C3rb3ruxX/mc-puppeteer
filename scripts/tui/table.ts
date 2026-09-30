@@ -90,9 +90,15 @@ const PREFIX = 4
 
 /**
  * Las filas de la tabla, ya pintadas y con la anchura del panel.
- * `focus` marca con `>` la instancia cuyo inventario se mira al lado.
+ * `focus` es el indice de la instancia que se mira al lado, o `null` cuando el
+ * panel de la derecha esta en vista global y no hay ninguna en concreto.
  */
-export const renderTable = (targets: Row[], width: number, height: number, focus: number): string[] => {
+export const renderTable = (
+	targets: Row[],
+	width: number,
+	height: number,
+	focus: number | null,
+): string[] => {
 	const cols = visibleColumns(width - PREFIX)
 	// El titulo tambien lleva el hueco del prefijo, para que cada columna de la
 	// cabecera caiga encima de la suya.

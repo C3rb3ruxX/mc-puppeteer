@@ -146,7 +146,12 @@ const items = async (_args: string, targets: Target[]): Promise<number> => {
 	return failures
 }
 
-/** Elige que instancia se mira en el panel de la derecha. */
+/**
+ * Elige que instancia se mira en el panel de la derecha.
+ *
+ * Sin foco se ve la suma de todas, que es lo normal. `focus` estrecha la vista a
+ * una sola, y `focus all` (o `next` dando la vuelta entera) vuelve a la global.
+ */
 const focus = (args: string): void => {
 	const targets = state.targets
 	if (targets.length === 0) {
@@ -155,7 +160,12 @@ const focus = (args: string): void => {
 	}
 	const arg = args.trim()
 	if (arg === '' || arg === 'next') {
-		state.focus = (state.focus + 1) % targets.length
+		// El foco recorre 0, 1, ... y vuelta a la suma de todas. Se cuenta desde
+		// -1 para que desde la vista global entre directamente en la primera.
+		const actual = state.focus === null ? -1 : state.focus
+		state.focus = actual + 1 >= targets.length ? null : actual + 1
+	} else if (arg === 'all' || arg === 'todos' || arg === 'none') {
+		state.focus = null
 	} else if (arg === 'first') {
 		state.focus = 0
 	} else {
@@ -164,13 +174,20 @@ const focus = (args: string): void => {
 		else {
 			const n = Number(arg)
 			if (!Number.isInteger(n) || n < 1 || n > targets.length) {
-				warnLine(`focus: usa un numero del 1 al ${targets.length}, un nombre, o 'next'`)
+				warnLine(
+					`focus: usa un numero del 1 al ${targets.length}, un nombre, ` +
+						`'all' (volver a la suma de todas) o 'next'`,
+				)
 				return
 			}
 			state.focus = n - 1
 		}
 	}
-	push(`inventario de ${targets[state.focus]?.name}`)
+	push(
+		state.focus === null
+			? 'inventario de todas las instancias (sumado)'
+			: `inventario de ${targets[state.focus]?.name}`,
+	)
 }
 
 export const COMMANDS: Record<string, Handler> = {
@@ -226,7 +243,8 @@ Panel de control de las instancias de mc-puppeteer.
 
 Zonas del panel:
   izquierda  una fila por instancia: estado, mundo, vida, comida, posicion.
-  derecha    inventario de la instancia marcada con >, de mas a menos.
+  derecha    inventario de todos los bots sumado, de mas a menos. Con focus
+             se mira solo el de uno, que es el que marca la tabla con >.
   abajo      feed con el chat y las respuestas; se recorre con las flechas.
 
 Ordenes (con / delante o escribiendolas tal cual):
@@ -248,9 +266,10 @@ Ordenes (con / delante o escribiendolas tal cual):
   profile <nombre>    Cambia la identidad offline.
   status              Fuerza la lectura del estado.
   players             Quien esta en el mundo.
-  items               Inventario de todas, en el feed. El de la derecha es
-                      automatico para la instancia marcada con >.
-  focus <n|nombre>    Cambia la instancia cuyo inventario se mira (next, first).
+  items               Inventario de cada seleccionada, en el feed. El de la
+                      derecha suma el de todas.
+  focus <n|nombre>    Mira el inventario de una sola instancia en vez de la suma
+                      de todas (next, first, all para volver a la global).
   history [n]         Historial de chat (por defecto 15). No lo vacia.
   log <n> [mcN]       Ultimas lineas del log de una instancia.
   every <seg>         Cambia el intervalo de refresco.

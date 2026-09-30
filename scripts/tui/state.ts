@@ -30,8 +30,13 @@ export const state = {
 	targets: [] as Target[],
 	input: '',
 	scroll: 0,
-	/** Instancia cuyo inventario se mira en el panel de la derecha. */
-	focus: 0,
+	/**
+ * Indice de la instancia cuyo inventario se mira en el panel de la derecha, o
+ * `null` para la vista global: la suma del inventario de todas. Es el
+ * defecto, porque lo que se quiere ver de un vistazo es cuanto hay entre
+ * todos; `focus` sirve para cuando hace falta mirar uno en concreto.
+ */
+	focus: null as number | null,
 }
 
 /**

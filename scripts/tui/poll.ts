@@ -7,14 +7,14 @@
  *     llega, se comprueba con `/health`, que no toca el juego.
  *   - el historial de chat se lee sin vaciar el buffer del mod: solo se pintan
  *     los mensajes nuevos, y la marca avanza al final del volcado.
- *   - el inventario se pide solo para la instancia que se esta mirando en el
- *     panel de la derecha; son hasta 41 ranuras y no hace falta en todas.
+ *   - el inventario se pide a todas las vivas, porque el panel de la derecha
+ *     muestra la suma de todas y no solo una.
  */
 
 import { c, paint } from './ansi.ts'
 import { call, healthy } from './api.ts'
 import { fetchInventory } from './inventory.ts'
-import { push, state } from './state.ts'
+import { push } from './state.ts'
 import type { Target } from './types.ts'
 
 export const refresh = async (targets: Target[]): Promise<void> => {
@@ -73,9 +73,12 @@ export const pullChat = async (targets: Target[]): Promise<void> => {
 	)
 }
 
-/** Inventario de la instancia enfocada en el panel. */
-export const pullInventory = async (): Promise<void> => {
-	const focus = state.targets[Math.min(state.focus, Math.max(0, state.targets.length - 1))]
-	if (!focus || !focus.up) return
-	await fetchInventory(focus)
+/**
+ * Inventario de todas las instancias vivas, en paralelo: el panel de la derecha
+ * muestra la suma, asi que hacen falta todas. Con `focus` solo se mira una, pero
+ * volver a la vista global no deberia costar un ciclo entero de peticiones, y el
+ * precio son como mucho 41 ranuras por bot (y solo las ocupadas).
+ */
+export const pullInventory = async (targets: Target[]): Promise<void> => {
+	await Promise.all(targets.filter(target => target.up).map(target => fetchInventory(target)))
 }

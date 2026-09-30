@@ -21,6 +21,12 @@ export const c = {
 	yellow: '\x1b[33m',
 	blue: '\x1b[36m',
 	grey: '\x1b[90m',
+	/**
+	 * Los marcos de las cajas. No es `grey` a proposito: el gris (ANSI 90) lo
+	 * pintan de negro algunos temas de terminal, y un marco negro sobre fondo
+	 * negro no se ve. El azul claro se distingue siempre del texto.
+	 */
+	frame: '\x1b[94m',
 }
 
 export const paint = (text: string, ...styles: string[]): string =>
