@@ -10,12 +10,19 @@ import java.net.URI
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
+import java.awt.Polygon
+import java.awt.RenderingHints
+import java.awt.geom.AffineTransform
+import java.awt.image.BufferedImage
+import java.io.ByteArrayOutputStream
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
 import java.time.Duration
+	import javax.imageio.ImageIO
 	import java.util.concurrent.ConcurrentHashMap
 	import java.util.concurrent.Executors
+import java.util.jar.JarFile
 
 import java.util.concurrent.TimeUnit
 
@@ -748,29 +755,182 @@ class DashboardServer @JvmOverloads constructor(
 	 * Sacarlos bien haria falta el atlas ya montado, o sea dentro del juego.
 	 */
 	private fun itemSprite(exchange: HttpExchange, raw: String) {
-		val name = raw.lowercase()
-		if (!NOMBRE_SPRITE.matches(name)) {
+		val parts = raw.lowercase().split('/', limit = 2)
+		val namespace = if (parts.size == 2) parts[0] else "minecraft"
+		val name = if (parts.size == 2) parts[1] else parts[0]
+		if (!NAMESPACE_SPRITE.matches(namespace) || !NOMBRE_SPRITE.matches(name)) {
 			send(exchange, 400, json(errorBody("bad_item", "nombre de item no valido: '$raw'")))
 			return
 		}
 
 		// Un array vacio es "no hay sprite", y se cachea tambien: si no, cada
 		// fallo hacia un recorrido del jar entero por cada item que no exista.
-		val png = sprites.computeIfAbsent(name) { loadSprite(it) }
+		val key = "$namespace:$name"
+		val png = sprites.computeIfAbsent(key) { loadSprite(namespace, name) }
 		if (png.isEmpty()) {
-			send(exchange, 404, json(errorBody("no_sprite", "el juego no trae un sprite para '$name'")))
+			send(exchange, 404, json(errorBody("no_sprite", "el juego no trae un sprite para '$key'")))
 			return
 		}
 		sendImage(exchange, png)
 	}
 
-	private fun loadSprite(name: String): ByteArray {
-		for (carpeta in listOf("item", "block")) {
-			val recurso = "/assets/minecraft/textures/$carpeta/$name.png"
-			val entrada = DashboardServer::class.java.getResourceAsStream(recurso) ?: continue
-			return entrada.use { it.readBytes() }
-		}
+	private fun loadSprite(namespace: String, name: String): ByteArray {
+		// Las herramientas, comida y otros objetos 2D tienen su sprite listo.
+		loadResource("assets/$namespace/textures/item/$name.png")?.let { return it }
+
+		// Los bloques se dibujan como el modelo isométrico que aparece en el
+		// inventario del juego, usando sus caras y texturas vanilla.
+		renderBlockSprite(namespace, name)?.let { return it }
+
+		loadResource("assets/$namespace/textures/block/$name.png")?.let { return it }
+		// Algunos modelos de item tienen una textura distinta al id del item.
+		itemModelTexture(namespace, name)?.let { return it }
+
+		// `runDashboard` no ejecuta dentro del classpath de Minecraft: Loom pone
+		// el JAR del cliente en el classpath de `runClient`, que el launcher ya
+		// volcó a scripts/.run-config.json. Léase de ese JAR para servir los PNG
+		// reales también cuando el panel se arranca por separado.
 		return ByteArray(0)
+	}
+
+	private fun renderBlockSprite(namespace: String, name: String): ByteArray? {
+		val textures = linkedMapOf<String, String>()
+		val seen = mutableSetOf<String>()
+
+		fun collect(ns: String, model: String, depth: Int = 0) {
+			if (depth > 12 || !seen.add("$ns:$model")) return
+			val json = loadResource("assets/$ns/models/$model.json") ?: return
+			val root = runCatching { com.google.gson.JsonParser.parseString(String(json, StandardCharsets.UTF_8)).asJsonObject }
+				.getOrNull() ?: return
+			val parent = root.get("parent")?.takeIf { it.isJsonPrimitive }?.asString
+			if (parent != null) {
+				val split = parent.split(':', limit = 2)
+				collect(if (split.size == 2) split[0] else ns, if (split.size == 2) split[1] else split[0], depth + 1)
+			}
+			root.getAsJsonObject("textures")?.entrySet()?.forEach { (key, value) ->
+				if (value.isJsonPrimitive) textures[key] = value.asString
+			}
+		}
+
+		collect(namespace, "item/$name")
+		if (textures.isEmpty()) collect(namespace, "block/$name")
+		if (textures.isEmpty()) return null
+
+		fun texture(keys: List<String>): BufferedImage? {
+			for (key in keys) {
+				var value = textures[key] ?: continue
+				val resolved = mutableSetOf<String>()
+				while (value.startsWith('#') && resolved.add(value)) {
+					value = textures[value.drop(1)] ?: break
+				}
+				if (value.startsWith('#')) continue
+				val split = value.split(':', limit = 2)
+				val texNs = if (split.size == 2) split[0] else namespace
+				val texPath = if (split.size == 2) split[1] else split[0]
+				if (!NOMBRE_SPRITE.matches(texPath)) continue
+				val category = texPath.substringBefore('/')
+				val filename = texPath.substringAfter('/', "")
+				if (category !in setOf("item", "block") || filename.isEmpty()) continue
+				val bytes = loadResource("assets/$texNs/textures/$category/$filename.png") ?: continue
+				return runCatching { ImageIO.read(bytes.inputStream()) }.getOrNull()
+			}
+			return null
+		}
+
+		// Un sprite generado (por ejemplo, item/generated) no es un bloque.
+		val layers = textures.keys.filter { it.startsWith("layer") && it.drop(5).toIntOrNull() != null }
+			.sortedBy { it.drop(5).toInt() }
+		if (layers.isNotEmpty()) {
+			val canvas = BufferedImage(16, 16, BufferedImage.TYPE_INT_ARGB)
+			val g = canvas.createGraphics()
+			g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR)
+			for (layer in layers) texture(listOf(layer))?.let { g.drawImage(it, 0, 0, 16, 16, null) }
+			g.dispose()
+			return pngBytes(canvas)
+		}
+
+		val particle = texture(listOf("particle"))
+		val top = texture(listOf("up", "top", "end", "all", "side", "north")) ?: particle ?: return null
+		val front = texture(listOf("north", "front", "side", "all", "end", "top")) ?: particle ?: top
+		val side = texture(listOf("east", "side", "all", "north", "top")) ?: particle ?: front
+		val canvas = BufferedImage(20, 22, BufferedImage.TYPE_INT_ARGB)
+		val g = canvas.createGraphics()
+		g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR)
+		drawFace(g, top, 2, 6, 10, 10, 10, 2)
+		drawFace(g, front, 2, 6, 10, 10, 2, 16)
+		drawFace(g, side, 10, 10, 18, 6, 10, 20)
+		g.dispose()
+		return pngBytes(canvas)
+	}
+
+	private fun drawFace(g: java.awt.Graphics2D, texture: BufferedImage, x0: Int, y0: Int, x1: Int, y1: Int, x2: Int, y2: Int) {
+		val x3 = x1 + x2 - x0
+		val y3 = y1 + y2 - y0
+		val polygon = Polygon(intArrayOf(x0, x1, x3, x2), intArrayOf(y0, y1, y3, y2), 4)
+		val previous = g.clip
+		g.clip(polygon)
+		val transform = AffineTransform(
+			(x1 - x0).toDouble() / texture.width,
+			(y1 - y0).toDouble() / texture.width,
+			(x2 - x0).toDouble() / texture.height,
+			(y2 - y0).toDouble() / texture.height,
+			x0.toDouble(), y0.toDouble(),
+		)
+		g.drawImage(texture, transform, null)
+		g.clip = previous
+	}
+
+	private fun itemModelTexture(namespace: String, name: String): ByteArray? {
+	val json = loadResource("assets/$namespace/models/item/$name.json") ?: return null
+	val root = runCatching { com.google.gson.JsonParser.parseString(String(json, StandardCharsets.UTF_8)).asJsonObject }
+		.getOrNull() ?: return null
+	val texture = root.getAsJsonObject("textures")?.get("layer0")?.takeIf { it.isJsonPrimitive }?.asString ?: return null
+	val split = texture.split(':', limit = 2)
+	val texNs = if (split.size == 2) split[0] else namespace
+	val path = if (split.size == 2) split[1] else split[0]
+	if (!NOMBRE_SPRITE.matches(path)) return null
+	val category = path.substringBefore('/')
+	val file = path.substringAfter('/', "")
+	if (category !in setOf("item", "block") || file.isEmpty()) return null
+	return loadResource("assets/$texNs/textures/$category/$file.png")
+}
+
+	private fun pngBytes(image: BufferedImage): ByteArray = ByteArrayOutputStream().use { out ->
+		ImageIO.write(image, "png", out)
+		out.toByteArray()
+	}
+
+	private fun loadResource(resource: String): ByteArray? {
+		val bytes = resourceCache.computeIfAbsent(resource) {
+			DashboardServer::class.java.getResourceAsStream("/$resource")?.use { it.readBytes() }?.let { return@computeIfAbsent it }
+			for (archivo in runConfigJars) {
+				val found = runCatching {
+					JarFile(archivo.toFile()).use { jar ->
+						jar.getJarEntry(resource)?.let { entry -> jar.getInputStream(entry).use { it.readBytes() } }
+					}
+				}.getOrNull()
+				if (found != null) return@computeIfAbsent found
+			}
+			ByteArray(0)
+		}
+		return bytes.takeIf { it.isNotEmpty() }
+	}
+
+	private val resourceCache = ConcurrentHashMap<String, ByteArray>()
+
+	/** JARes del cliente devuelto por Loom, donde viven las texturas vanilla. */
+	private val runConfigJars: List<Path> by lazy {
+		val config = Path.of(System.getProperty("user.dir") ?: ".")
+			.resolve("scripts").resolve(".run-config.json")
+		if (!Files.isRegularFile(config)) return@lazy emptyList()
+		runCatching {
+			val classpath = com.google.gson.JsonParser.parseString(Files.readString(config))
+				.asJsonObject.getAsJsonArray("classpath")
+			classpath.mapNotNull { entry ->
+				runCatching { Path.of(entry.asString) }.getOrNull()
+					?.takeIf { Files.isRegularFile(it) && it.fileName.toString().endsWith(".jar", ignoreCase = true) }
+			}
+		}.getOrDefault(emptyList())
 	}
 
 	private val sprites = ConcurrentHashMap<String, ByteArray>()
@@ -783,6 +943,7 @@ class DashboardServer @JvmOverloads constructor(
 	 * comprobar nada mas. Se cierra tambien el `..` por si acaso, aunque el
 	 * patron ya lo excluye.
 	 */
+	private val NAMESPACE_SPRITE = Regex("[a-z0-9_.-]+")
 	private val NOMBRE_SPRITE = Regex("[a-z0-9_]+(/[a-z0-9_]+)*")
 
 	/** A diferencia del resto, aqui si se cachea: los sprites no cambian nunca. */

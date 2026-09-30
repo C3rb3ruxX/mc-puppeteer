@@ -611,9 +611,11 @@ function slotHtml(slot, selected) {
  * inventa una URL: la ranura se queda con el texto desde el principio.
  */
 function spriteUrl(id) {
-  const camino = String(id).split(":")[1];
-  if (!camino || !/^[a-z0-9_]+(\/[a-z0-9_]+)*$/.test(camino)) return "";
-  return "/assets/item/" + camino;
+  const partes = String(id).split(":");
+  const namespace = partes.length === 2 ? partes[0] : "minecraft";
+  const camino = partes.length === 2 ? partes[1] : partes[0];
+  if (!/^[a-z0-9_.-]+$/.test(namespace) || !/^[a-z0-9_]+(\/[a-z0-9_]+)*$/.test(camino)) return "";
+  return "/assets/item/" + namespace + "/" + camino;
 }
 
 function inventoryHtml(id) {
