@@ -77,6 +77,7 @@ esperas, un `null` en `screen` es normal, no un error.
 | `GET` | `/inventory` | Inventario: barra, mochila, armadura y mano secundaria. |
 | `GET` | `/chat?limit=N` | Lee el chat pendiente y **lo consume**. |
 | `GET` | `/chat/history?limit=N` | Copia del historial **sin consumir**. |
+| `GET` | `/chat/screen?limit=N` | Lo escrito en la pantalla, incluido el chat local de Baritone. |
 | `POST` | `/chat` | Envia un mensaje de chat. |
 | `POST` | `/command` | Envia un comando. |
 | `POST` | `/connect` | Conecta a un servidor. |
@@ -213,6 +214,43 @@ curl.exe -s "$BASE/chat/history?limit=50" -H $AUTH
   }
 }
 ```
+
+### `GET /chat/screen?limit=N`
+
+Lo que **se ve escrito en la pantalla del cliente**, tal cual. No es lo mismo que
+`/chat` ni que `/chat/history`, y la diferencia es la que masaca al usar
+Baritone.
+
+`/chat` y `/chat/history` se alimentan de `ClientReceiveMessageEvents`, que solo
+dispara con paquetes **de la red**. Baritone no envia nada al servidor: escribe en
+el chat local del juego. Por eso una orden como `#mine acacia_block 32` salia
+con `200 ok` y su `Error at argument #2: Expected ForBlockOptionalMeta` no
+aparecia por ningun lado. Con esta ruta si se ve.
+
+```powershell
+curl.exe -s "$BASE/chat/screen?limit=30" -H $AUTH
+```
+
+```json
+{
+  "ok": true,
+  "data": {
+    "lines": [
+      "[Baritone] Error at argument #2: Expected ForBlockOptionalMeta",
+      "[Baritone] > mine acacia_log 8"
+    ]
+  }
+}
+```
+
+`limit` va de 1 a 200, por defecto 30, y recorta por el final, que es lo
+reciente. Devuelve las ultimas lineas en el orden en que se leen, **sin**
+invertir: la mas reciente es la ultima del array.
+
+No consume nada y se puede llamar en bucle. Se lee en el hilo principal del
+cliente, asi que no compite con la lista de la interfaz. Es la unica forma de
+saber si una orden de Baritone ha hecho algo, asi que el panel la relee en
+cuanto le mandas una orden.
 
 ### `POST /chat`
 
@@ -552,11 +590,22 @@ la respuesta HTTP. Para leerlo:
 ```powershell
 curl.exe -s -X POST "$BASE/baritone/mine" -H $AUTH -d '{"block":"diamond_ore"}'
 Start-Sleep -Seconds 2
-curl.exe -s "$BASE/chat?limit=20"
+curl.exe -s "$BASE/chat/screen?limit=20"
 ```
+
+Ojo: `GET /chat` **no** vale para esto, por lo que se explicaba mas arriba.
+Baritone contesta en el chat local y no manda nada por la red, asi que ahi no
+aparece ni el exito ni el error. Si la orden fallaba, el unico rastro era el
+`200 ok` de la llamada.
 
 Alternativa inmediata, sin esperar: `POST /chat` con el prefijo a mano, p. ej.
 `{"message":"#mine diamond_ore"}`. Es lo mismo que hace `/baritone/mine`.
+
+Un detalle que marea: en 1.21.5 `acacia_block` no es un bloque valido y Baritone
+contesta `Error at argument #2: Expected ForBlockOptionalMeta`. El nombre
+correcto es `acacia_log`, que si es un tronco. Esa respuesta tampoco salia por
+`/chat`, y con ella se puede distinguir una orden mala de una orden que Baritone
+ha CFDendido mal.
 
 ### Validacion
 

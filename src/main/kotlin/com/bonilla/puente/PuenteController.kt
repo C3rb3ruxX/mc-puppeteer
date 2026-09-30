@@ -36,6 +36,14 @@ class PuenteController(
 
 	fun chat(limit: Int): List<CapturedMessage> = chatLog.drain(limit, all = false)
 
+	/**
+	 * Chat en pantalla, que incluye lo que responde Baritone en local.
+	 *
+	 * Se salta a otro metodo del puente porque la lista interna del
+	 * `ChatComponent` la toca el hilo principal del juego.
+	 */
+	fun screenChat(limit: Int): List<String> = mainThread.callOnMainThread { bridge.screenChat(limit) }
+
 	fun chatHistory(limit: Int): List<CapturedMessage> = chatLog.snapshot(limit)
 
 	fun sentHistory(): List<String> = chatLog.recentSent()

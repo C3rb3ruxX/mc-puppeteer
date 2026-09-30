@@ -15,9 +15,9 @@ Hay dos bancos, y los dos se ejecutan con `java` directamente:
 | Banco | Aserciones | Que necesita |
 |---|---|---|
 | `PuenteSmokeTest` | 195 | Nada, solo el JDK y el classpath del proyecto |
-| `DashboardSmokeTest` | 33 | Nada, levanta un stub HTTP |
+| `DashboardSmokeTest` | 35 | Nada, levanta un stub HTTP |
 
-228 en total. Ojo con la cuenta: el numero mas alto de la etiqueta no es el
+230 en total. Ojo con la cuenta: el numero mas alto de la etiqueta no es el
 total. En `PuenteSmokeTest` las etiquetas llegan a `[156]`, pero hay 35
 aserciones mas con sufijo de letra (`[26a]`, `[27b]`…), asi que son 195.
 
@@ -64,7 +64,7 @@ java -cp "$out:$cp" PuenteSmokeTest
 
 Sale con codigo de salida 1 si algo falla, asi que sirve directamente en CI.
 
-Aparte, `tests/DashboardSmokeTest.java` prueba el panel de instancias (33
+Aparte, `tests/DashboardSmokeTest.java` prueba el panel de instancias (35
 aserciones) con un stub que hace de Puente; no necesita el juego, solo su jar en
 el classpath, de donde salen los sprites de los items.
 

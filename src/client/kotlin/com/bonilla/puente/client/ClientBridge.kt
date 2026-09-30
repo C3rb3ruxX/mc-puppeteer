@@ -114,6 +114,8 @@ class ClientBridge(
 		requireConnection().sendCommand(command)
 	}
 
+	override fun screenChat(limit: Int): List<String> = ScreenChat.last(limit)
+
 	override fun connect(host: String, port: Int, name: String) {
 		val mc = Minecraft.getInstance()
 

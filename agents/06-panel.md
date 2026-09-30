@@ -177,6 +177,38 @@ En 1.21.5 no hay release oficial de Baritone (el repo upstream llega a
 proyecto o de version hay que volver a elegir un jar, porque la
 `standalone` de 1.20 no carga en 1.21.5 y el juego aborta.
 
+Como el jar no esta en ningun repositorio de Maven y su nombre no lleva
+version dentro, la tarea `ensureBaritone` lo deja siempre en su sitio antes de
+cualquier prueba:
+
+```powershell
+.\gradlew.bat ensureBaritone
+```
+
+Se ejecuta sola con `build` y con las de prueba. Si el jar no esta o no cuadra el
+SHA-256, lo borra y lo vuelve a bajar; si ya esta bien, no toca nada. El checksum
+va en el propio codigo (`BARITONE_SHA256`), asi que cambiar de version es cambiar
+esa constante, no buscar el fichero a mano. Comprobado tanto con el jar ya
+presente como borrandolo y dejandolo que lo descargue.
+
+### `Lo que contesta el juego`
+
+Este bloque no es cosmetico. `/baritone/mine` devuelve `202 ok` en cuanto el
+mensaje sale del navegador: eso significa que el texto llego al cliente, **no**
+que Baritone lo entendiera. Y como Baritone contesta en el chat local del juego,
+sin salir por la red, ninguna ruta `/chat` lo recogia. Una orden rechazada
+dejaba un panel en verde y ni una pista de que hubiera pasado.
+
+Por eso el panel tiene su propio boton, que lee `GET /chat/screen?limit=N`, y lo
+rele solo despues de cada accion de Baritone. Lo que sale ahi es lo que veria
+una persona, con sus errores: `#mine acacia_block 32` responde `Error at
+argument #2: Expected ForBlockOptionalMeta` (en 1.21.5 no existe ese bloque; es
+`acacia_log`).
+
+No es un mixin nuevo. El modulo lee por reflexion la lista de la clase
+`ChatComponent` del vanilla, que ya existe en el juego, y por eso no se toca
+`baritone` en el classpath ni se rompe con la primera actualizacion.
+
 ### limites
 
 - Solo puertos de `25580` a `25599`, comprobados en el servidor. El navegador no
@@ -196,6 +228,9 @@ Por cada instancia, una tarjeta con:
 - Chat y comandos, con registro de lo que se ha enviado y lo que ha pasado.
 - Baritone: minar por bloque y cantidad, seguir a un jugador, parar y un
   "Estado" que consulta `version`, `proc`, `eta` y `paused`.
+- "Lo que contesta el juego": el chat en pantalla del cliente, que es donde
+  Baritone responde. Se relee solo tras cada orden, para que un rechazo se vea
+  al momento y no un minuto mas tarde.
 - Inventario, dibujado como en el juego: 9 huecos de barra rapida, 27 de
   mochila, y las cuatro piezas de armadura mas la mano secundaria. La ranura
   seleccionada sale marcada, y los objetos concai dano muestran `actual/max`.
@@ -221,7 +256,7 @@ multijugador no es de fiar y no deberia poder inyectar HTML en el panel.
 `agents/tests/DashboardSmokeTest.java` levanta un stub que imita a Puente y el
 hub encima, y comprueba de punta a punta el proxy (metodo, cuerpo, query),
 el sondeo de estado, la persistencia, el borrado, el lanzador, los sprites de los
-items y las defensas. 33 aserciones, sin necesitar Minecraft (el jar del cliente
+items y las defensas. 35 aserciones, sin necesitar Minecraft (el jar del cliente
 si tiene que estar en el classpath, que es de donde salen los sprites).
 
 No cubre: que el hub se comporte bien con muchas instancias a la vez, ni
@@ -237,6 +272,8 @@ Lo que si se ha probado a mano, con clientes de verdad:
 - Descubrimiento con estado real: version de Minecraft, mundo, dimension y FPS.
 - Que Baritone recibe los comandos: el log del cliente enseña
   `[CHAT] [Baritone] > version` y su respuesta.
+- Que `GET /chat/screen` devuelve la respuesta de Baritone, incluido su
+  `Error at argument #2` al pedir un bloque inexistente en 1.21.5.
 - Parar las dos y comprobar que los puertos quedan libres.
 - Que lanzar fuera de rango da `400`, y que parar algo que el hub no arranco no
   hace nada.

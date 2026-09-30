@@ -70,6 +70,11 @@ public class DashboardSmokeTest {
 				if (path.endsWith("/status")) {
 				payload = "{\"ok\":true,\"data\":{\"inWorld\":true,\"playerName\":\"Bot\","
 					+ "\"dead\":false,\"fps\":60}}";
+			} else if (path.endsWith("/chat/screen")) {
+				// Es lo que devuelve el mod de verdad: texto plano por linea,
+				// incluida la respuesta de Baritone, que no pasa por la red.
+				payload = "{\"ok\":true,\"data\":{\"lines\":"
+					+ "[\"[Baritone] > mine acacia_log 8\"]}}";
 			} else {
 				payload = "{\"ok\":true,\"data\":{\"echo\":\"" + path + "\"}}";
 			}
@@ -278,6 +283,27 @@ public class DashboardSmokeTest {
 			stubPath.get().equals("/puppeteer/chat"),
 			"ruta que llego a la instancia=" + stubPath.get()
 				+ " (si sale /puppeteerchat falta la barra de separacion)");
+		// El chat en pantalla es lo unico que deja ver si una orden de Baritone
+		// ha hecho algo: Baritone contesta en el chat local del cliente, no por
+		// la red, asi que sin esto el panel solo puede decir "ok" y nada mas.
+		//
+		// Va con el stub VIVO, antes del DELETE de mas abajo. Apagado, cualquier
+		// ruta mal montada acabaria en error de conexion y el test pasaria igual
+		// de verde, que es lo que hacia pasar el test del broadcast.
+		stubPath.set("(nunca)");
+		HttpResponse<String> screenRes = get(http, base2 + "/api/instances/p" + stubPort + "/chat/screen?limit=5");
+		check("[25] el proxy lleva /chat/screen a la instancia viva",
+			stubPath.get().equals("/puppeteer/chat/screen"),
+			"ruta que llego a la instancia=" + stubPath.get()
+				+ " (si sale /puppeteerchatscreen falta la barra de separacion)");
+		JsonObject screen = JsonParser.parseString(screenRes.body()).getAsJsonObject();
+		JsonArray lineas = screen.has("data")
+			? screen.getAsJsonObject("data").getAsJsonArray("lines")
+			: new JsonArray();
+		check("[26] el hub devuelve las lineas del chat en pantalla sin reordenar",
+			screenRes.statusCode() == 200 && lineas.size() == 1
+				&& lineas.get(0).getAsString().contains("Baritone"),
+			"HTTP " + screenRes.statusCode() + " cuerpo=" + screenRes.body());
 
 		// --- Borrado -----------------------------------------------------
 		HttpResponse<String> removed = http.send(
@@ -287,7 +313,7 @@ public class DashboardSmokeTest {
 			HttpResponse.BodyHandlers.ofString());
 		int after = JsonParser.parseString(get(http, base2 + "/api/instances").body())
 			.getAsJsonObject().getAsJsonObject("data").getAsJsonArray("instances").size();
-		check("[25] quitar una instancia la saca del listado",
+		check("[27] quitar una instancia la saca del listado",
 			removed.statusCode() == 200 && after == 1,
 			"borrado=" + removed.statusCode() + " quedan=" + after);
 
@@ -301,12 +327,12 @@ public class DashboardSmokeTest {
 		boolean bcastReports = bcast.get("total").getAsInt() == 1
 			&& results.size() == 1
 			&& !results.get(0).getAsJsonObject().get("ok").getAsBoolean();
-		check("[26] el broadcast llega a todas y reporta una por una", bcastReports,
+		check("[28] el broadcast llega a todas y reporta una por una", bcastReports,
 			"total=" + bcast.get("total") + " results=" + results);
 
 		JsonObject noRoute = JsonParser.parseString(
 			post(http, base2 + "/api/broadcast/", "{}").body()).getAsJsonObject();
-		check("[27] broadcast sin ruta -> 400 y no se reenvia a ninguna",
+		check("[29] broadcast sin ruta -> 400 y no se reenvia a ninguna",
 			noRoute.getAsJsonObject().get("ok").getAsBoolean() == false,
 			"respuesta=" + noRoute);
 
@@ -315,7 +341,7 @@ public class DashboardSmokeTest {
 		HttpResponse<String> disc = post(http, base2 + "/api/discover", "{}");
 		JsonObject discData = JsonParser.parseString(disc.body())
 			.getAsJsonObject().getAsJsonObject("data");
-		check("[28] descubrir responde 200 con los puertos escaneados",
+		check("[30] descubrir responde 200 con los puertos escaneados",
 			disc.statusCode() == 200 && discData.has("scanned") && discData.has("added"),
 			"scanned=" + (discData.has("scanned") ? discData.get("scanned") : "?"));
 
@@ -323,7 +349,7 @@ public class DashboardSmokeTest {
 
 		JsonObject launcherState = JsonParser.parseString(get(http, base2 + "/api/launcher").body())
 			.getAsJsonObject().getAsJsonObject("data");
-		check("[29] el lanzador informa del rango permitido y si esta compilado",
+		check("[31] el lanzador informa del rango permitido y si esta compilado",
 			launcherState.get("from").getAsInt() == 25580 && launcherState.get("to").getAsInt() == 25599
 				&& launcherState.has("ready"),
 			"state=" + launcherState);
@@ -333,18 +359,18 @@ public class DashboardSmokeTest {
 		// de procesos arbitrario.
 		HttpResponse<String> badPort = post(http, base2 + "/api/launch", "{\"port\":1234}");
 		JsonObject badErr = JsonParser.parseString(badPort.body()).getAsJsonObject().getAsJsonObject("error");
-		check("[30] lanzar en un puerto fuera de rango se rechaza",
+		check("[32] lanzar en un puerto fuera de rango se rechaza",
 			badPort.statusCode() == 400 && badErr.get("code").getAsString().equals("launch_failed"),
 			"status=" + badPort.statusCode() + " err=" + badErr);
 
 		HttpResponse<String> noPort = post(http, base2 + "/api/launch", "{}");
-		check("[31] lanzar sin puerto -> 400", noPort.statusCode() == 400,
+		check("[33] lanzar sin puerto -> 400", noPort.statusCode() == 400,
 			"status=" + noPort.statusCode());
 
 		// Parar algo que el hub no ha arrancado no es un error: es un "no" claro.
 		HttpResponse<String> stopFree = post(http, base2 + "/api/stop", "{\"port\":25583}");
 		JsonObject stopData = JsonParser.parseString(stopFree.body()).getAsJsonObject().getAsJsonObject("data");
-		check("[32] parar una instancia que el hub no arranco no hace nada",
+		check("[34] parar una instancia que el hub no arranco no hace nada",
 			stopFree.statusCode() == 200 && !stopData.get("stopped").getAsBoolean(),
 			"data=" + stopData);
 

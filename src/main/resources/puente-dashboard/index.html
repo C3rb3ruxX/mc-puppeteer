@@ -281,6 +281,7 @@ main { padding: 22px 24px 40px; max-width: 1560px; margin: 0 auto; }
 .log .sys { color: var(--accent); }
 .log .err { color: var(--bad); }
 .log .ok { color: var(--ok); }
+.log .bari { color: var(--accent); }
 
 .hidden { display: none !important; }
 .empty-note { color: var(--muted); font-style: italic; font-size: 12.5px; }
@@ -434,16 +435,57 @@ const state = {
   invOpen: {},     // id -> bool
   expanded: {},    // id -> bool
   chat: {},        // id -> [{text, kind}]
-    busy: {},        // id -> bool
-    drafts: {},      // "id:campo" -> lo escrito y todavia no enviado
-  };
-
+  screen: {},      // id -> { open: bool, lines: [string] }
+  busy: {},        // id -> bool
+  drafts: {},      // "id:campo" -> lo escrito y todavia no enviado
+};
 
 function log(id, text, kind = "") {
   if (!state.chat[id]) state.chat[id] = [];
   const buf = state.chat[id];
   buf.push({ text, kind });
   if (buf.length > 120) buf.splice(0, buf.length - 120);
+}
+
+/**
+ * El chat en pantalla del cliente, que es donde Baritone responde.
+ *
+ * No confundir con `state.chat`, que es el feed de lo que llega por la red. Ahi
+ * nunca aparece una respuesta de Baritone, porque Baritone escribe en el chat
+ * local del juego y no manda nada al servidor. Sin este otro feed, una orden
+ * rechazada era invisible: el panel decia "ok" y no habia forma de saber si
+ * Baritone habia minado o habia entendido mal el bloque.
+ */
+async function loadScreenChat(id) {
+  const s = state.screen[id] || (state.screen[id] = { open: false, lines: [] });
+  const res = await api(`/api/instances/${id}/chat/screen?limit=30`);
+  if (res.status === 200 && res.body && res.body.data && Array.isArray(res.body.data.lines)) {
+    s.lines = res.body.data.lines;
+  } else {
+    const e = res.body && res.body.error;
+    s.lines = [`No se pudo leer: ${e ? e.code + " — " + e.message : "HTTP " + res.status}`];
+  }
+}
+
+async function toggleScreenChat(id) {
+  const s = state.screen[id] || (state.screen[id] = { open: false, lines: [] });
+  s.open = !s.open;
+  if (s.open) await loadScreenChat(id);
+  render();
+}
+
+/** La mas reciente primero, que es la que interesa y la que cabe sin scroll. */
+function screenChatHtml(id) {
+  const s = state.screen[id];
+  if (!s || !s.lines || !s.lines.length) {
+    return `<p class="empty-note">Sin lineas que enseñar.</p>`;
+  }
+  const cuerpo = s.lines.slice().reverse().map(line => {
+    const esBari = line.indexOf("[Baritone]") >= 0;
+    const esError = /\b(error|failed|unknown|expected|not found)\b/i.test(line);
+    return `<div class="${esError ? "err" : esBari ? "bari" : ""}">${esc(line)}</div>`;
+  }).join("");
+  return `<div class="log">${cuerpo}</div>`;
 }
 
 /** Pide una accion a una instancia y anota el resultado en su log. */
@@ -464,6 +506,14 @@ async function act(id, path, body, label) {
       const msg = e ? e.code + " — " + e.message : "HTTP " + res.status;
       log(id, `✗ ${label}: ${msg}`, "err");
       toast(`${label} — ${msg}`, "err");
+    }
+    // El "ok" de arriba solo dice que la orden salio de aqui. Lo que de verdad
+    // responde es el juego, asi que si el chat en pantalla esta abierto se
+    // relee: si Baritone rechaza el bloque, su error sale ahora, y no dentro
+    // de un minuto cuando alguien se acuerde de mirarlo.
+    if (state.screen[id] && state.screen[id].open) {
+      await loadScreenChat(id);
+      render();
     }
   } catch (err) {
     log(id, `✗ ${label}: ${err.message}`, "err");
@@ -646,6 +696,19 @@ function cardHtml(inst) {
             value="${esc(draftVal(inst.id, "follow"))}">
           <button class="btn" data-act="follow" data-id="${esc(inst.id)}" ${dis}>Seguir</button>
         </div>
+        <div class="row" style="justify-content:space-between;margin-top:9px">
+          <h3 style="margin:0;font-size:.9rem">${ICON_CHAT} Lo que contesta el juego</h3>
+          <button class="btn sm" data-act="gchat" data-id="${esc(inst.id)}" ${dis}>
+            ${state.screen[inst.id] && state.screen[inst.id].open ? "Ocultar" : "Ver"}</button>
+        </div>
+        <p class="hint">
+          Baritone responde en el chat de la pantalla, no por la red, asi que sin esto
+          una orden rechazada (por ejemplo un bloque que no existe en esta version)
+          no dejaba ni rastro: el panel ponia "ok" y no se podia saber nada.
+        </p>
+        <div class="${state.screen[inst.id] && state.screen[inst.id].open ? "" : "hidden"}">
+          ${screenChatHtml(inst.id)}
+        </div>
       </div>
 
       <div class="sect">
@@ -793,6 +856,7 @@ const ACTIONS = {
   bstop: (id) => act(id, "baritone/stop", {}, "parar Baritone"),
   binfo: (id) => baritoneInfo(id),
   follow: (id) => withInput(id, "follow", v => act(id, "baritone/follow", { target: v }, `seguir a ${v}`)),
+  gchat: (id) => toggleScreenChat(id),
   remove: (id) => removeInstance(id),
   stop: (id) => stopInstance(id),
 };

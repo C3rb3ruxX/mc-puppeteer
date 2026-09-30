@@ -23,6 +23,7 @@ public class PuenteSmokeTest {
 	static final AtomicInteger chatCalls = new AtomicInteger();
 	static final AtomicInteger commandCalls = new AtomicInteger();
 	static final List<String> sentChat = new ArrayList<>();
+	static final List<String> screenLines = List.of("[Baritone] ok");
 	static final HttpClient http = HttpClient.newHttpClient();
 	static String base;
 	static String token = "token-secreto";
@@ -97,6 +98,14 @@ public class PuenteSmokeTest {
 				onMainThreadCalls.incrementAndGet();
 				commandCalls.incrementAndGet();
 				checkOnMain("sendCommand '" + c + "'");
+			}
+			@Override public List<String> screenChat(int limit) {
+				// El hilo principal es la parte interesante: la lista del chat la
+				// toca el juego, asi que leerla desde el hilo HTTP seria una
+				// carrera. Aqui solo se comprueba que se pida desde alli.
+				onMainThreadCalls.incrementAndGet();
+				checkOnMain("screenChat " + limit);
+				return screenLines;
 			}
 			@Override public void connect(String h, int p, String n) {
 				onMainThreadCalls.incrementAndGet();

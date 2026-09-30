@@ -196,7 +196,20 @@ class PuenteHttpServer(
 				}))
 			}
 
+			// El chat en pantalla, que si incluye las respuestas locales de Baritone.
+			// `/chat` y `/chat/history` solo ven lo que llega por la red, asi que una
+			// orden rechazada por Baritone se perdia sin dejar rastro.
+			"/chat/screen" -> {
+				requireMethod(exchange, "GET")
+				val limit = queryInt(exchange, "limit", 30, 1, 200)
+				val lineas = controller.screenChat(limit)
+				send(exchange, 200, okBody(JsonObject().apply {
+					add("lines", JsonArray().apply { lineas.forEach { add(it) } })
+				}))
+			}
+
 			"/command" -> {
+
 				requireMethod(exchange, "POST")
 				val body = readJson(exchange)
 				val sent = controller.sendCommand(body.requireString("command"))
@@ -405,6 +418,7 @@ class PuenteHttpServer(
 			add("GET  $BASE_PATH/players")
 			add("GET  $BASE_PATH/chat?limit=N")
 			add("GET  $BASE_PATH/chat/history?limit=N")
+			add("GET  $BASE_PATH/chat/screen?limit=N   (incluye lo que responde Baritone en local)")
 			add("POST $BASE_PATH/chat      { \"message\": \"hola\" }")
 			add("POST $BASE_PATH/command   { \"command\": \"list\" }   (sin barra)")
 			add("POST $BASE_PATH/connect   { \"address\": \"host:puerto\" }")

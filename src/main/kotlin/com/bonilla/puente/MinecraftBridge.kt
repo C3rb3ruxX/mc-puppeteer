@@ -32,6 +32,15 @@ interface MinecraftBridge {
 	 */
 	fun sendCommand(command: String)
 
+	/**
+	 * Ultimas lineas del chat **en pantalla**, de la mas antigua a la mas reciente.
+	 *
+	 * No es lo mismo que el historial capturado: ahi solo entra lo que llega por
+	 * la red, y las respuestas locales de Baritone no llegan por la red. Sirve
+	 * justamente para ver si una orden de Baritone ha funcionado.
+	 */
+	fun screenChat(limit: Int): List<String>
+
 	/** Conecta a un servidor arbitrario. */
 	fun connect(host: String, port: Int, name: String)
 
