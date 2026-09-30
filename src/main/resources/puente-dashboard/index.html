@@ -255,6 +255,16 @@ main { padding: 22px 24px 40px; max-width: 1560px; margin: 0 auto; }
   background: linear-gradient(160deg, rgba(76, 141, 255, .16), rgba(139, 92, 246, .1));
 }
 .slot .n { position: absolute; right: 3px; bottom: 2px; font-size: 9px; color: var(--warn); }
+/* El sprite es el contenido de la ranura; el texto solo si no hay imagen. */
+.slot .ico {
+  width: 78%; height: 78%;
+  /* `pixelated` para que el 16x16 se vea limpio al ampliarlo, y no emborronado. */
+  image-rendering: pixelated;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, .55));
+}
+.slot .txt { display: none; padding: 0 2px; }
+.slot.no-sprite .ico { display: none; }
+.slot.no-sprite .txt { display: block; }
 .slot.sel { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(76, 141, 255, .35); }
 .armor { display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px; margin-top: 8px; }
 
@@ -424,8 +434,10 @@ const state = {
   invOpen: {},     // id -> bool
   expanded: {},    // id -> bool
   chat: {},        // id -> [{text, kind}]
-  busy: {},        // id -> bool
-};
+    busy: {},        // id -> bool
+    drafts: {},      // "id:campo" -> lo escrito y todavia no enviado
+  };
+
 
 function log(id, text, kind = "") {
   if (!state.chat[id]) state.chat[id] = [];
@@ -506,13 +518,33 @@ function slotHtml(slot, selected) {
   if (!slot || !slot.id) {
     return `<div class="slot" title="vacío"></div>`;
   }
-  // El nombre traducido se acorta: dentro de un cuadrado no cabe entero.
+  // El sprite llega por `id` (`minecraft:diamond_ore`). Solo el camino importa:
+  // el hub los saca del jar del cliente, y lo que no encuentre responde 404.
+  const sprite = spriteUrl(slot.id);
+  // El nombre traducido se acorta: dentro de un cuadrado no cabe entero, y solo
+  // se ve cuando no hay imagen.
   const words = String(slot.name || slot.id).split(" ");
   const short = words.length > 2 ? words.slice(0, 2).join(" ") : (slot.name || slot.id);
   const dmg = (slot.maxDamage && slot.maxDamage > 0)
-    ? `<div class="n">${slot.damage}/${slot.maxDamage}</div>` : "";
+    ? `<div class="n">${slot.damage}/${slot.maxDamage}</div>`
+    : (slot.count > 1 ? `<div class="n">${slot.count}</div>` : "");
   return `<div class="slot filled${selected ? " sel" : ""}"
-    title="${esc(slot.name || slot.id)} ×${slot.count}\n${esc(slot.id)}">${esc(short)}${dmg}</div>`;
+    title="${esc(slot.name || slot.id)} ×${slot.count}\n${esc(slot.id)}">` +
+      (sprite ? `<img class="ico" alt="" src="${esc(sprite)}">` : "") +
+      `<span class="txt">${esc(short)}</span>${dmg}</div>`;
+}
+
+/**
+ * URL del sprite de un id de item, o "" si no tiene sentido ni pedirlo.
+ *
+ * El `id` viene como `minecraft:diamond_ore` y el hub solo entiende el camino
+ * (`diamond_ore`). Se descarta el namespace, y si el id trae algo raro no se
+ * inventa una URL: la ranura se queda con el texto desde el principio.
+ */
+function spriteUrl(id) {
+  const camino = String(id).split(":")[1];
+  if (!camino || !/^[a-z0-9_]+(\/[a-z0-9_]+)*$/.test(camino)) return "";
+  return "/assets/item/" + camino;
 }
 
 function inventoryHtml(id) {
@@ -587,11 +619,13 @@ function cardHtml(inst) {
       <div class="sect">
         <h3>${ICON_CHAT} Chat y comandos</h3>
         <div class="row">
-          <input class="grow" data-input="chat" data-id="${esc(inst.id)}" placeholder="Mensaje para el chat">
+          <input class="grow" data-input="chat" data-id="${esc(inst.id)}" placeholder="Mensaje para el chat"
+            value="${esc(draftVal(inst.id, "chat"))}">
           <button class="btn" data-act="chat" data-id="${esc(inst.id)}" ${dis}>Enviar</button>
         </div>
         <div class="row">
-          <input class="grow" data-input="cmd" data-id="${esc(inst.id)}" placeholder="Comando, sin / (p. ej. list)">
+          <input class="grow" data-input="cmd" data-id="${esc(inst.id)}" placeholder="Comando, sin / (p. ej. list)"
+            value="${esc(draftVal(inst.id, "cmd"))}">
           <button class="btn" data-act="cmd" data-id="${esc(inst.id)}" ${dis}>Ejecutar</button>
         </div>
       </div>
@@ -599,14 +633,17 @@ function cardHtml(inst) {
       <div class="sect">
         <h3>${ICON_BOT} Baritone</h3>
         <div class="row">
-          <input data-input="block" data-id="${esc(inst.id)}" placeholder="diamond_ore" value="diamond_ore">
-          <input data-input="amount" data-id="${esc(inst.id)}" class="n" type="number" value="32" min="1">
+          <input data-input="block" data-id="${esc(inst.id)}" placeholder="diamond_ore"
+            value="${esc(draftVal(inst.id, "block", "diamond_ore"))}">
+          <input data-input="amount" data-id="${esc(inst.id)}" class="n" type="number" min="1"
+            value="${esc(draftVal(inst.id, "amount", "32"))}">
           <button class="btn" data-act="mine" data-id="${esc(inst.id)}" ${dis}>Minar</button>
           <button class="btn" data-act="bstop" data-id="${esc(inst.id)}" ${dis}>Parar</button>
           <button class="btn" data-act="binfo" data-id="${esc(inst.id)}" ${dis}>Estado</button>
         </div>
         <div class="row">
-          <input data-input="follow" data-id="${esc(inst.id)}" placeholder="Seguir a un jugador">
+          <input data-input="follow" data-id="${esc(inst.id)}" placeholder="Seguir a un jugador"
+            value="${esc(draftVal(inst.id, "follow"))}">
           <button class="btn" data-act="follow" data-id="${esc(inst.id)}" ${dis}>Seguir</button>
         </div>
       </div>
@@ -635,7 +672,38 @@ function cardHtml(inst) {
 }
 
 function render() {
+  // Al reescribir el `innerHTML` del grid se destruyen todos los inputs, y con
+  // ellos el foco y lo que estuviera escrito. El sondeo va cada 2 s, asi que sin
+  // esto no se podia escribir ni un mensaje corto: a los dos segundos el campo
+  // perdia el foco y el texto. Se apunta a mano donde estaba el cursor y se
+  // devuelve despues de redibujar.
+  const activo = document.activeElement;
+  const cursor = activo && activo.dataset && activo.dataset.input
+    ? {
+        id: activo.dataset.id,
+        campo: activo.dataset.input,
+        ini: activo.selectionStart,
+        fin: activo.selectionEnd,
+      }
+    : null;
+
   el("grid").innerHTML = state.instances.map(cardHtml).join("");
+
+  if (cursor) {
+    // Puede no estar: si la instancia desaparecio en este mismo render.
+    const nuevo = el("grid").querySelector(
+      `[data-input="${cursor.campo}"][data-id="${cursor.id}"]`
+    );
+    if (nuevo) {
+      nuevo.focus();
+      // Los `type="number"` no admiten setSelectionRange y lanzan; da igual,
+      // el foco ya esta puesto.
+      try {
+        if (cursor.ini !== null) nuevo.setSelectionRange(cursor.ini, cursor.fin);
+      } catch (e) { /* number input */ }
+    }
+  }
+
   el("noInstances").style.display = state.instances.length ? "none" : "block";
 
   const on = state.instances.filter(i => i.online);
@@ -731,6 +799,20 @@ const ACTIONS = {
 
 function readInput(id, name) {
   return el(`grid`).querySelector(`[data-input="${name}"][data-id="${id}"]`)?.value.trim() ?? "";
+}
+
+/**
+ * Lo que hay escrito en un campo, o [defecto] si nunca se ha tocado.
+ *
+ * Los inputs se redibujan enteros en cada sondeo, asi que su valor vive en el
+ * DOM y se perderia. Se guarda aqui en cuanto se escribe y se vuelve a pintar,
+ * para que recargar, cambiar de tarjeta o pulsar "Detalle" no borre un mensaje a
+ * medias. Distingue "vacio" de "sin tocar": un campo que el usuario ha dejado
+ * en blanco se queda en blanco, no vuelve al valor por defecto.
+ */
+function draftVal(id, name, defecto = "") {
+  const clave = id + ":" + name;
+  return clave in state.drafts ? state.drafts[clave] : defecto;
 }
 
 function withInput(id, name, fn) {
@@ -909,6 +991,22 @@ async function refreshLauncher() {
   el("newPort").max = d.to;
   el("newPort").placeholder = `libre (${d.from}–${d.to})`;
 }
+
+// Delegado, no uno por input: los inputs se recrean en cada render y cualquier
+// `addEventListener` puesto sobre ellos se perderia en el siguiente sondeo.
+document.addEventListener("input", (ev) => {
+  const f = ev.target.closest("[data-input]");
+  if (f) state.drafts[f.dataset.id + ":" + f.dataset.input] = f.value;
+});
+
+// Si un item no trae sprite, el hub responde 404 y se deja el nombre corto, que
+// es como se veía antes. `error` no burbujea, asi que va en fase de captura.
+document.addEventListener("error", (ev) => {
+  const img = ev.target;
+  if (img.tagName !== "IMG" || !img.classList.contains("ico")) return;
+  const ranura = img.closest(".slot");
+  if (ranura) ranura.classList.add("no-sprite");
+}, true);
 
 document.addEventListener("click", (ev) => {
   const btn = ev.target.closest("[data-act]");

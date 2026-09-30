@@ -78,6 +78,7 @@ para quien exponga Puente a otra red, pero el panel no lo usa ni lo pide.
 |---|---|
 | `GET /` | El panel. |
 | `GET /api/health` | Vivo, y cuantas instancias hay. |
+| `GET /assets/item/{item}` | El sprite de un item, leido del jar del cliente. |
 | `GET /api/instances` | Instancias con su estado actual, sondeadas en paralelo. |
 | `POST /api/instances` | Dar de alta `{name, host, port}`. Sin token. |
 | `DELETE /api/instances/{id}` | Quitar del panel. **No cierra Minecraft.** |
@@ -96,6 +97,29 @@ responde `502 instance_offline`; si la instancia tarda, `504 instance_timeout`.
 El registro se guarda en `dashboard-instances.json` junto al proyecto, escrito de
 forma atomica (temporal + `move`) porque la pagina puede estar guardando en ese
 momento.
+
+## Los iconos del inventario
+
+Cada ranura muestra el sprite del item, no su nombre. Salen de
+`GET /assets/item/{item}` y de ahi **del jar del cliente**, que ya esta en el
+classpath del hub: no hay carpeta de PNG que mantener ni peticion a un CDN de
+terceros, que ademas se enteraria de lo que hay en el inventario.
+
+El nombre del item (`minecraft:diamond_ore`) no suele ser el nombre del fichero
+(`textures/block/diamond_ore.png`), asi que se prueban las dos carpetas. No es un
+adivino: el atlas de 1.21.5, en `assets/minecraft/atlases/blocks.json`, declara
+sus fuentes como directorios, o sea que todo lo que hay en `textures/item/` es un
+sprite llamado `<nombre>` y lo mismo en `textures/block/`. Los bloques de textura
+plana dan en el segundo, las herramientas y la comida en el primero.
+
+Lo que **no** sale es el item cuyo sprite se compone de varias texturas
+(`crafting_table`, `furnace`, `chest`): el sprite no se llama como el item. Esos
+dan `404` y la ranura se queda con el nombre corto, igual que antes. Sacarlos
+bien haria falta el atlas ya montado, o sea, dentro del juego.
+
+El nombre se valida con `^[a-z0-9_]+(/[a-z0-9_]+)*$` antes de tocar el classpath.
+Sin eso, `/assets/item/../../build.gradle.kts` seria un lector de ficheros con
+salida a Internet. El banco comprueba que un `..` no sale de `assets/`.
 
 ## Arrancar instancias desde el panel
 
@@ -196,11 +220,15 @@ multijugador no es de fiar y no deberia poder inyectar HTML en el panel.
 
 `agents/tests/DashboardSmokeTest.java` levanta un stub que imita a Puente y el
 hub encima, y comprueba de punta a punta el proxy (metodo, cuerpo, query),
-el sondeo de estado, la persistencia, el borrado, el lanzador y las defensas.
-29 aserciones, sin necesitar Minecraft.
+el sondeo de estado, la persistencia, el borrado, el lanzador, los sprites de los
+items y las defensas. 33 aserciones, sin necesitar Minecraft (el jar del cliente
+si tiene que estar en el classpath, que es de donde salen los sprites).
 
 No cubre: que el hub se comporte bien con muchas instancias a la vez, ni
-ninguna prueba de navegador (el JavaScript del panel no esta automatizado).
+ninguna prueba de navegador. El JavaScript se valida parseando el bloque
+`<script>` entero con esbuild, que detecta errores de sintaxis reales pero no lo
+ejecuta: que el panel se comporte bien al escribir en un campo, eso se ha probado
+a mano.
 
 Lo que si se ha probado a mano, con clientes de verdad:
 
@@ -212,3 +240,5 @@ Lo que si se ha probado a mano, con clientes de verdad:
 - Parar las dos y comprobar que los puertos quedan libres.
 - Que lanzar fuera de rango da `400`, y que parar algo que el hub no arranco no
   hace nada.
+- Que los sprites salen del jar: `GET /assets/item/diamond_sword` devuelve un PNG
+  de 16x16 de verdad, y `..` no sale de `assets/`.

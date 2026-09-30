@@ -215,11 +215,49 @@ public class DashboardSmokeTest {
 				good.status() == 200 && good.body().contains("\"ok\":true"),
 				good.status() + " " + abbreviate(good.body()));
 
+			// --- Iconos de item -------------------------------------------------
+			// El hub los saca del jar del cliente, que esta en el mismo classpath.
+			// Se comprueba que sale un PNG de verdad, no que la ruta existe.
+			HttpResponse<byte[]> sprite = http.send(
+				HttpRequest.newBuilder(URI.create(base + "/assets/item/diamond_sword")).GET().build(),
+				HttpResponse.BodyHandlers.ofByteArray());
+			byte[] png = sprite.body();
+			boolean esPng = png.length > 8
+				&& (png[0] & 0xFF) == 0x89 && png[1] == 'P' && png[2] == 'N' && png[3] == 'G';
+			check("[19] el sprite de un item sale del jar del juego",
+				sprite.statusCode() == 200 && esPng
+					&& sprite.headers().firstValue("content-type").orElse("").equals("image/png"),
+				sprite.statusCode() + " bytes=" + png.length + " tipo="
+					+ sprite.headers().firstValue("content-type").orElse("?"));
+
+			// Un bloque no tiene item/<id>.png sino block/<id>.png: sale del
+			// atlas, que declara esas fuentes como directorios.
+			HttpResponse<byte[]> bloque = http.send(
+				HttpRequest.newBuilder(URI.create(base + "/assets/item/diamond_ore")).GET().build(),
+				HttpResponse.BodyHandlers.ofByteArray());
+			check("[20] tambien sale el sprite de un bloque (texturas/block)",
+				bloque.statusCode() == 200 && bloque.body().length > 8
+					&& (bloque.body()[0] & 0xFF) == 0x89,
+				bloque.statusCode() + " bytes=" + bloque.body().length);
+
+			// Un item que no existe: 404, y el panel deja el nombre corto.
+			HttpResponse<String> noSprite = get(http, base + "/assets/item/no_existe_este_item");
+			check("[21] un item sin sprite da 404 y no un 500",
+				noSprite.statusCode() == 404 && noSprite.body().contains("no_sprite"),
+				noSprite.statusCode() + " " + noSprite.body());
+
+			// Lo importante: el nombre va a un getResourceAsStream sin validar, asi
+			// que sin este filtro la ruta seria un lector de ficheros de classpath.
+			HttpResponse<String> escape = get(http, base + "/assets/item/..%2F..%2Fbuild.gradle.kts");
+			check("[22] un nombre con .. no sale de assets/ (no lector de classpath)",
+				escape.statusCode() == 400 || escape.statusCode() == 404,
+				escape.statusCode() + " " + abbreviate(escape.body()));
+
 			// --- Persistencia ------------------------------------------------
 			hub.stop();
 			InstanceRegistry reloaded = new InstanceRegistry(file);
 			int persisted = reloaded.load().size();
-			check("[19] las instancias sobreviven a un reinicio del hub", persisted == 2,
+			check("[23] las instancias sobreviven a un reinicio del hub", persisted == 2,
 				"persistidas=" + persisted);
 
 		// --- Broadcast -------------------------------------------------------
@@ -236,7 +274,7 @@ public class DashboardSmokeTest {
 		stubPath.set("(nunca)");
 		JsonParser.parseString(
 			post(http, base2 + "/api/broadcast/chat", "{\"message\":\"hola\"}").body());
-		check("[21] el broadcast monta bien la ruta en la instancia viva",
+		check("[24] el broadcast monta bien la ruta en la instancia viva",
 			stubPath.get().equals("/puppeteer/chat"),
 			"ruta que llego a la instancia=" + stubPath.get()
 				+ " (si sale /puppeteerchat falta la barra de separacion)");
@@ -249,7 +287,7 @@ public class DashboardSmokeTest {
 			HttpResponse.BodyHandlers.ofString());
 		int after = JsonParser.parseString(get(http, base2 + "/api/instances").body())
 			.getAsJsonObject().getAsJsonObject("data").getAsJsonArray("instances").size();
-		check("[20] quitar una instancia la saca del listado",
+		check("[25] quitar una instancia la saca del listado",
 			removed.statusCode() == 200 && after == 1,
 			"borrado=" + removed.statusCode() + " quedan=" + after);
 
@@ -263,12 +301,12 @@ public class DashboardSmokeTest {
 		boolean bcastReports = bcast.get("total").getAsInt() == 1
 			&& results.size() == 1
 			&& !results.get(0).getAsJsonObject().get("ok").getAsBoolean();
-		check("[22] el broadcast llega a todas y reporta una por una", bcastReports,
+		check("[26] el broadcast llega a todas y reporta una por una", bcastReports,
 			"total=" + bcast.get("total") + " results=" + results);
 
 		JsonObject noRoute = JsonParser.parseString(
 			post(http, base2 + "/api/broadcast/", "{}").body()).getAsJsonObject();
-		check("[23] broadcast sin ruta -> 400 y no se reenvia a ninguna",
+		check("[27] broadcast sin ruta -> 400 y no se reenvia a ninguna",
 			noRoute.getAsJsonObject().get("ok").getAsBoolean() == false,
 			"respuesta=" + noRoute);
 
@@ -277,7 +315,7 @@ public class DashboardSmokeTest {
 		HttpResponse<String> disc = post(http, base2 + "/api/discover", "{}");
 		JsonObject discData = JsonParser.parseString(disc.body())
 			.getAsJsonObject().getAsJsonObject("data");
-		check("[24] descubrir responde 200 con los puertos escaneados",
+		check("[28] descubrir responde 200 con los puertos escaneados",
 			disc.statusCode() == 200 && discData.has("scanned") && discData.has("added"),
 			"scanned=" + (discData.has("scanned") ? discData.get("scanned") : "?"));
 
@@ -285,7 +323,7 @@ public class DashboardSmokeTest {
 
 		JsonObject launcherState = JsonParser.parseString(get(http, base2 + "/api/launcher").body())
 			.getAsJsonObject().getAsJsonObject("data");
-		check("[25] el lanzador informa del rango permitido y si esta compilado",
+		check("[29] el lanzador informa del rango permitido y si esta compilado",
 			launcherState.get("from").getAsInt() == 25580 && launcherState.get("to").getAsInt() == 25599
 				&& launcherState.has("ready"),
 			"state=" + launcherState);
@@ -295,18 +333,18 @@ public class DashboardSmokeTest {
 		// de procesos arbitrario.
 		HttpResponse<String> badPort = post(http, base2 + "/api/launch", "{\"port\":1234}");
 		JsonObject badErr = JsonParser.parseString(badPort.body()).getAsJsonObject().getAsJsonObject("error");
-		check("[26] lanzar en un puerto fuera de rango se rechaza",
+		check("[30] lanzar en un puerto fuera de rango se rechaza",
 			badPort.statusCode() == 400 && badErr.get("code").getAsString().equals("launch_failed"),
 			"status=" + badPort.statusCode() + " err=" + badErr);
 
 		HttpResponse<String> noPort = post(http, base2 + "/api/launch", "{}");
-		check("[27] lanzar sin puerto -> 400", noPort.statusCode() == 400,
+		check("[31] lanzar sin puerto -> 400", noPort.statusCode() == 400,
 			"status=" + noPort.statusCode());
 
 		// Parar algo que el hub no ha arrancado no es un error: es un "no" claro.
 		HttpResponse<String> stopFree = post(http, base2 + "/api/stop", "{\"port\":25583}");
 		JsonObject stopData = JsonParser.parseString(stopFree.body()).getAsJsonObject().getAsJsonObject("data");
-		check("[28] parar una instancia que el hub no arranco no hace nada",
+		check("[32] parar una instancia que el hub no arranco no hace nada",
 			stopFree.statusCode() == 200 && !stopData.get("stopped").getAsBoolean(),
 			"data=" + stopData);
 

@@ -14,7 +14,9 @@ import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
 import java.time.Duration
-import java.util.concurrent.Executors
+	import java.util.concurrent.ConcurrentHashMap
+	import java.util.concurrent.Executors
+
 import java.util.concurrent.TimeUnit
 
 /**
@@ -127,7 +129,10 @@ class DashboardServer @JvmOverloads constructor(
 					addProperty("instances", registry.all().size)
 				})))
 
-				path.startsWith("api/broadcast/") -> {
+				path.startsWith("assets/item/") ->
+				itemSprite(exchange, path.removePrefix("assets/item/"))
+
+			path.startsWith("api/broadcast/") -> {
 					// Ojo: se quita `api/broadcast` y NO la barra. La cola tiene que
 					// llegar a `forward` con su `/` inicial, si no el destino se
 					// construye como `/puppeteerchat` y la instancia responde 404.
@@ -642,6 +647,80 @@ class DashboardServer @JvmOverloads constructor(
 
 	private fun sendHtml(exchange: HttpExchange, html: String) =
 		sendRaw(exchange, 200, html.toByteArray(StandardCharsets.UTF_8), "text/html; charset=utf-8")
+
+	// --- iconos de item -------------------------------------------------------
+
+	/**
+	 * Los sprites de los items, tal cual los trae el juego.
+	 *
+	 * No hay que pedirlos a ningun sitio: el jar del cliente esta en el classpath
+	 * del hub (es el mismo `scripts/.run-config.json` con el que se arranca), asi
+	 * que se leen de ahi en vez de montar una carpeta de PNG ni pegarle una
+	 * peticion a un CDN de terceros, que ademas se enteraria de lo que hay en tu
+	 * inventario.
+	 *
+	 * El atlas de 1.21.5 (`assets/minecraft/atlases/blocks.json`) declara sus
+	 * fuentes como directorios: todo lo que hay en `textures/item/` es un sprite
+	 * llamado `<nombre>`, y lo mismo en `textures/block/`. Por eso el nombre del
+	 * item se resuelve probando los dos sitios, y basta: los bloques de textura
+	 * plana (piedra, diamante, tierra) dan en el segundo, y las herramientas y la
+	 * comida en el primero.
+	 *
+	 * Lo que no sale es el item cuyo sprite se compone de varias texturas
+	 * (`crafting_table`, `furnace`, `chest`): para esos el sprite no se llama como
+	 * el item. Se responde 404 y el panel deja el texto, que es lo de antes.
+	 * Sacarlos bien haria falta el atlas ya montado, o sea dentro del juego.
+	 */
+	private fun itemSprite(exchange: HttpExchange, raw: String) {
+		val name = raw.lowercase()
+		if (!NOMBRE_SPRITE.matches(name)) {
+			send(exchange, 400, json(errorBody("bad_item", "nombre de item no valido: '$raw'")))
+			return
+		}
+
+		// Un array vacio es "no hay sprite", y se cachea tambien: si no, cada
+		// fallo hacia un recorrido del jar entero por cada item que no exista.
+		val png = sprites.computeIfAbsent(name) { loadSprite(it) }
+		if (png.isEmpty()) {
+			send(exchange, 404, json(errorBody("no_sprite", "el juego no trae un sprite para '$name'")))
+			return
+		}
+		sendImage(exchange, png)
+	}
+
+	private fun loadSprite(name: String): ByteArray {
+		for (carpeta in listOf("item", "block")) {
+			val recurso = "/assets/minecraft/textures/$carpeta/$name.png"
+			val entrada = DashboardServer::class.java.getResourceAsStream(recurso) ?: continue
+			return entrada.use { it.readBytes() }
+		}
+		return ByteArray(0)
+	}
+
+	private val sprites = ConcurrentHashMap<String, ByteArray>()
+
+	/**
+	 * Lo unico que se admite en el nombre de un item.
+	 *
+	 * Sin esto, `/assets/item/../../some/file` seria un lector de ficheros de
+	 * classpath con salida a Internet: el nombre va a un `getResourceAsStream` sin
+	 * comprobar nada mas. Se cierra tambien el `..` por si acaso, aunque el
+	 * patron ya lo excluye.
+	 */
+	private val NOMBRE_SPRITE = Regex("[a-z0-9_]+(/[a-z0-9_]+)*")
+
+	/** A diferencia del resto, aqui si se cachea: los sprites no cambian nunca. */
+	private fun sendImage(exchange: HttpExchange, png: ByteArray) {
+		try {
+			exchange.responseHeaders.add("Content-Type", "image/png")
+			exchange.responseHeaders.add("X-Content-Type-Options", "nosniff")
+			exchange.responseHeaders.add("Cache-Control", "public, max-age=86400, immutable")
+			exchange.sendResponseHeaders(200, png.size.toLong())
+			exchange.responseBody.use { it.write(png) }
+		} catch (e: Exception) {
+			// Cliente que se fue: no es motivo para ensuciar el log.
+		}
+	}
 
 	private class Proxied(val status: Int, val body: ByteArray, val contentType: String)
 
