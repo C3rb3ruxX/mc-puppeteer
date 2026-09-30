@@ -401,11 +401,15 @@ Tres decisiones que hacen que esto sea utilizable por un bot:
   para que `hotbar[0]` sea siempre el slot 0. Omitirlos seria el error
   clasico: una lista compacta hace que el indice 1 sea en realidad el slot 2.
 - **La armadura se indexa por pieza** (`head`, `chest`, `legs`, `feet`) y no por
-  posicion. En 26.3 no hay accessor publico al NonNullList de armadura de
-  `LivingEntity` y la interfaz `Equipment` ya no existe, asi que se lee de
-  `Player.inventoryMenu` (lo mismo que la GUI) y el nombre se saca del propio
-  `ArmorSlot` por reflexion de un campo de tipo `EquipmentSlot`. No se supone
-  el orden de vanilla.
+  posicion. Cada pieza se lee con `LivingEntity.getItemBySlot(EquipmentSlot)`, que
+  es metodo publico y estable entre versiones, y el `index` que se devuelve es el
+  del slot equivalente del menu (5 cabeza, 6 pecho, 7 piernas, 8 pies).
+
+  Antes, en 26.3, se leia de `Player.inventoryMenu` y el nombre de la pieza se
+  sacaba del campo privado de `ArmorSlot` por reflexion. En 1.21.5 eso ya no
+  compila: `ArmorSlot` es package-private, asi que no se puede ni nombrar. Por eso
+  el `index` ahora se conoce en vez de deducirse: si vanilla reordenase el menu,
+  habria que tocar `ARMOR_PIECES`/`ARMOR_SLOT_START` en `ClientBridge`.
 
 `damage` y `maxDamage` solo se rellenan en objetos que se estropean; en el resto
 van a `null` en vez de a `0`, para no sugerir que existe un desgaste.

@@ -18,9 +18,6 @@ import net.minecraft.core.UUIDUtil
 import net.minecraft.core.registries.BuiltInRegistries
 import net.minecraft.network.chat.Component
 import net.minecraft.world.entity.EquipmentSlot
-import net.minecraft.world.inventory.ArmorSlot
-import net.minecraft.world.inventory.InventoryMenu
-import net.minecraft.world.inventory.Slot
 import net.minecraft.world.item.ItemStack
 import org.slf4j.Logger
 import java.util.Optional
@@ -187,37 +184,29 @@ class ClientBridge(
 	/**
 	 * Armadura indexada por pieza.
 	 *
-	 * En 26.3 no hay accessor publico al NonNullList de armadura de
-	 * `LivingEntity`, y la interfaz `Equipment` ya no existe. La via publica que
-	 * si queda es `Player.inventoryMenu`, que es lo mismo que lee la GUI, asi que
-	 * no puede desincronizarse de lo que ve el jugador.
+	 * Cada pieza se lee con `LivingEntity.getItemBySlot`, que es metodo publico y
+	 * estable: lo que lleva puesto la entidad, sin depender de como este partido
+	 * el menu por dentro. Asi se evita `Player.inventoryMenu`, que obligaba a
+	 * identificar los slots instances de `ArmorSlot`.
 	 *
-	 * El **nombre** de cada pieza se saca del propio `ArmorSlot` (que guarda un
-	 * `EquipmentSlot`) en vez de suponer el orden: el constructor recibe
-	 * `HEAD`/`CHEST`/`LEGS`/`FEET` y asi el mapa sale bien aunque vanilla reordene
-	 * los slots. El campo es privado, asi que se lee por tipo como en
-	 * [userField] para no depender del nombre ofuscado.
+	 * La clase `ArmorSlot` no se puede nombrar desde aqui: en 1.21.5 es
+	 * package-private (`class ArmorSlot extends Slot`, sin `public`), asi que
+	 * referenciarla en codigo Kotlin no compila. En 26.3 si era publica, y por eso
+	 * la version antigua de este metodo si podia hacer `slot is ArmorSlot`. El
+	 * precio de no depender de ella es tener que conocer el orden del menu, que
+	 * es fijo y es el que documenta `/inventory` (5 cabeza, 6 pecho, 7 piernas,
+	 * 8 pies).
 	 */
 	private fun armorSlots(player: net.minecraft.client.player.LocalPlayer): Map<String, ItemSlot> {
-		val menu = player.inventoryMenu
 		val pieces = LinkedHashMap<String, ItemSlot>()
 
-		for (i in InventoryMenu.ARMOR_SLOT_START until InventoryMenu.ARMOR_SLOT_END) {
-			// `NonNullList.get` no devuelve null, asi que el indice se presume
-			// dentro de rango: lo garantiza el propio menu de vanilla.
-			val slot = menu.slots.get(i)
-			val piece = equipmentSlotName(slot) ?: "slot$i"
-			pieces[piece] = slot.item.toSlot(i)
+		var slot = ARMOR_SLOT_START
+		for (piece in ARMOR_PIECES) {
+			pieces[piece.name.lowercase()] = player.getItemBySlot(piece).toSlot(slot)
+			slot++
 		}
 
 		return pieces
-	}
-
-	/** `true`/`false`/`null` segun sea armadura, otra cosa, o no se pudo leer. */
-	private fun equipmentSlotName(slot: Slot): String? {
-		if (slot !is ArmorSlot) return null
-		val field = armorSlotField ?: return null
-		return (field.get(slot) as? EquipmentSlot)?.name?.lowercase()
 	}
 
 	/**
@@ -385,23 +374,27 @@ class ClientBridge(
 		 */
 		private const val OFFHAND_INDEX = -1
 
+		/**
+		 * Piezas de armadura en el orden en el que las recorre el menu de
+		 * vanilla, que es el que refleja el `index` que documenta `/inventory`.
+		 *
+		 * El menu de un jugador mete 4 slots de fabricacion (0-4) y despues la
+		 * armadura de cabeza a pies, asi que el indice se cuenta hacia delante
+		 * desde [ARMOR_SLOT_START].
+		 */
+		private val ARMOR_PIECES = listOf(
+			EquipmentSlot.HEAD,
+			EquipmentSlot.CHEST,
+			EquipmentSlot.LEGS,
+			EquipmentSlot.FEET,
+		)
+
+		/** Primer slot de armadura del menu del jugador. */
+		private const val ARMOR_SLOT_START = 5
+
 		/** Resuelto una sola vez: la version de MC no cambia durante la sesion. */
 		val minecraftVersion: String by lazy {
 			runCatching { SharedConstants.getCurrentVersion().name }.getOrDefault("desconocida")
-		}
-
-		/**
-		 * Campo privado de [ArmorSlot] que guarda la pieza, localizado por tipo.
-		 *
-		 * `EquipmentSlot` es unico en `ArmorSlot`, asi que el desempate es seguro.
-		 * Si no se encuentra, la armadura se devuelve indexada por `slotN` en vez
-		 * de fallar: perder el nombre de la pieza es molesto, pero no merecer la
-		 * pena que `/inventory` deje de responder.
-		 */
-		private val armorSlotField: java.lang.reflect.Field? by lazy {
-			ArmorSlot::class.java.declaredFields
-				.firstOrNull { it.type == EquipmentSlot::class.java }
-				?.apply { isAccessible = true }
 		}
 	}
 }

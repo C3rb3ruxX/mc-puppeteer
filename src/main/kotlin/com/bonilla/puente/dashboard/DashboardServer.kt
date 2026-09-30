@@ -11,6 +11,8 @@ import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
 import java.nio.charset.StandardCharsets
+import java.nio.file.Files
+import java.nio.file.Path
 import java.time.Duration
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -110,10 +112,17 @@ class DashboardServer @JvmOverloads constructor(
 
 				path == "api/instances" && method == "GET" -> send(exchange, 200, listInstances())
 				path == "api/instances" && method == "POST" -> upsert(exchange)
+				path == "api/discover" && method == "POST" -> discover(exchange)
+
 				path == "api/health" && method == "GET" -> send(exchange, 200, json(okBody(Json.obj().apply {
 					addProperty("status", "ok")
 					addProperty("instances", registry.all().size)
 				})))
+
+				path.startsWith("api/broadcast/") -> {
+					val rest = path.removePrefix("api/broadcast/")
+					broadcast(exchange, method, rest, exchange.requestURI.rawQuery)
+				}
 
 				path.startsWith("api/instances/") -> {
 					val rest = path.removePrefix("api/instances/")
@@ -188,6 +197,225 @@ class DashboardServer @JvmOverloads constructor(
 		send(exchange, 200, json(okBody(Json.obj().apply { addProperty("removed", id) })))
 	}
 
+	/**
+	 * Reenvia la misma peticion a TODAS las instancias a la vez.
+	 *
+	 * Es lo que hace falta para "manda esto a todos": un `POST /broadcast/chat`
+	 * va a cada instancia en paralelo y devuelve un resultado por cada una,
+	 * con su estado HTTP o su error. No es todo-o-nada a proposito: si una
+	 * instancia esta apagada, las otras han recibido equally el mensaje y eso
+	 * hay que poder verlo.
+	 *
+	 * Sin esto, mandar un comando a 6 bots era 6 peticiones del navegador y
+	 * ademas no se podia saber cual habia recibido el mensaje.
+	 */
+	private fun broadcast(exchange: HttpExchange, method: String, tail: String, query: String?) {
+		if (tail.isBlank()) {
+			throw BadRequest("falta la ruta: /api/broadcast/{ruta} (por ejemplo /broadcast/chat)")
+		}
+		// Se comprueba aqui y no solo en el registro: el broadcast itera sobre
+		// lo que hay ahora, y el registro puede haber cambiado desde el arranque.
+		val targets = registry.all().filter { it.isLoopback }
+		if (targets.isEmpty()) {
+			send(exchange, 400, json(errorBody("no_instances", "no hay instancias registradas")))
+			return
+		}
+
+		val body = readBody(exchange)
+		val contentType = exchange.requestHeaders.getFirst("Content-Type")
+
+		// Todas en paralelo y con el mismo techo que el proxy: una instancia
+		// colgada no puede retrasar al resto del broadcast.
+		val futures = targets.map { instance ->
+			prober.submit<JsonObject> { broadcastOne(instance, method, tail, query, body, contentType) }
+		}
+
+		val results = JsonArray()
+		var sent = 0
+		var failed = 0
+		futures.forEach { future ->
+			val entry = try {
+				future.get(PROXY_TIMEOUT_MS + 500, TimeUnit.MILLISECONDS)
+			} catch (e: Exception) {
+				Json.obj().apply {
+					addProperty("id", "?")
+					addProperty("ok", false)
+					addProperty("error", "sin respuesta en ${PROXY_TIMEOUT_MS}ms")
+				}
+			}
+			results.add(entry)
+			if (entry.get("ok")?.asBoolean == true) sent++ else failed++
+		}
+
+		send(exchange, 200, json(okBody(Json.obj().apply {
+			add("results", results)
+			addProperty("total", targets.size)
+			addProperty("sent", sent)
+			addProperty("failed", failed)
+		})))
+	}
+
+	/** Una instancia dentro del broadcast. Nunca lanza: el fallo es un dato. */
+	private fun broadcastOne(
+		instance: Instance,
+		method: String,
+		tail: String,
+		query: String?,
+		body: ByteArray,
+		contentType: String?,
+	): JsonObject {
+		val entry = Json.obj().apply {
+			addProperty("id", instance.id)
+			addProperty("name", instance.name)
+		}
+		return try {
+			val response = forward(instance, method, tail, query, body, contentType)
+			entry.addProperty("ok", response.status in 200..299)
+			entry.addProperty("status", response.status)
+			// El cuerpo de cada instancia se devuelve tal cual, para que la pagina
+			// pueda decir "el bot 3 dijo X" y no solo "ok".
+			val parsed = runCatching {
+				com.google.gson.JsonParser.parseString(String(response.body, StandardCharsets.UTF_8))
+			}.getOrNull()
+			if (parsed != null) entry.add("body", parsed) else entry.add("body", com.google.gson.JsonNull.INSTANCE)
+			entry
+		} catch (e: java.net.ConnectException) {
+			entry.addProperty("ok", false)
+			entry.addProperty("error", "apagada (nadie escucha en ${instance.port})")
+			entry
+		} catch (e: java.net.http.HttpTimeoutException) {
+			entry.addProperty("ok", false)
+			entry.addProperty("error", "no respondio a tiempo")
+			entry
+		} catch (e: Exception) {
+			entry.addProperty("ok", false)
+			entry.addProperty("error", e.message ?: e.javaClass.simpleName)
+			entry
+		}
+	}
+
+	/**
+	 * Busca instancias de Puente en un rango de puertos y da de alta las que
+	 * todavia no estan en el panel.
+	 *
+	 * Existe para el caso "la he abierto yo desde la terminal, que me salga en
+	 * la pagina": arrancar Minecraft a mano no pasa por el hub, asi que sin esto
+	 * esa instancia seria invisible hasta que alguien laiese a mano.
+	 *
+	 * Solo se dan de alta si contestan como Puente de verdad, y se comprueba en
+	 * el registro de la configuracion de juego de cada instancia para traer su
+	 * token. Asi el token no lo pone el navegador ni viaja por la pagina: lo lee
+	 * el hub del sitio donde el propio mod lo escribio.
+	 */
+	private fun discover(exchange: HttpExchange) {
+		val from = DEFAULT_SCAN_FROM
+		val to = DEFAULT_SCAN_TO
+
+		val known = registry.all().map { it.port }.toSet()
+		val candidates = (from..to).filterNot { it in known }
+		if (candidates.isEmpty()) {
+			send(exchange, 200, json(okBody(Json.obj().apply {
+				addProperty("scanned", 0)
+				add("added", JsonArray())
+			})))
+			return
+		}
+
+		val futures = candidates.map { candidate ->
+			prober.submit<Discovered?> { detect(candidate) }
+		}
+
+		val added = JsonArray()
+		var scanned = 0
+		futures.forEach { future ->
+			val found = try {
+				future.get(DISCOVERY_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+			} catch (e: Exception) {
+				null
+			}
+			scanned++
+			if (found != null) {
+				registry.upsert(found.name, LOOPBACK, found.port, found.token)
+				added.add(Json.obj().apply {
+					addProperty("id", "p${found.port}")
+					addProperty("name", found.name)
+					addProperty("port", found.port)
+					addProperty("hasToken", found.token.isNotEmpty())
+				})
+			}
+		}
+
+		send(exchange, 200, json(okBody(Json.obj().apply {
+			addProperty("scanned", scanned)
+			add("added", added)
+		})))
+	}
+
+	/**
+	 * Pregunta a un puerto si hay un Puente y de donde es.
+	 *
+	 * Se conforma con un 401 a proposito: si el puerto responde 401 a /status es
+	 * que **si** hay un Puente con token, y basta para darlo de alta. Descubrir
+	 * "hay algo aqui" no necesita permiso, y exigirlo dejaria fuera justamente
+	 * las instancias bien configuradas, que son las que mas importan.
+	 */
+	private fun detect(port: Int): Discovered? {
+		val target = URI("http://$LOOPBACK:$port/puppeteer/status")
+		val request = HttpRequest.newBuilder(target)
+			.timeout(Duration.ofMillis(DISCOVERY_TIMEOUT_MS))
+			.GET()
+			.build()
+
+		val response = try {
+			client.send(request, HttpResponse.BodyHandlers.ofString())
+		} catch (e: Exception) {
+			return null
+		}
+
+		val isPuente = when (response.statusCode()) {
+			// Con token: responde 401, pero el 401 es de Puente.
+			401 -> response.body().contains("unauthorized")
+			200 -> runCatching {
+				val data = com.google.gson.JsonParser.parseString(response.body())
+					.asJsonObject.getAsJsonObject("data")
+				// `modVersion` solo lo escribe el mod; sirve de firma.
+				data.has("modVersion")
+			}.getOrDefault(false)
+			else -> false
+		}
+		if (!isPuente) return null
+
+		val token = tokenForPort(port)
+		return Discovered(port, "Instancia $port", token)
+	}
+
+	/**
+	 * Busca el token de un puerto en las carpetas de juego conocidas.
+	 *
+	 * Se leen los ficheros que el propio mod escribe al arrancar, no se le pide
+	 * el token a nadie: asi el secreto nunca sale hacia el navegador y el hub
+	 * no necesita inventar nada.
+	 */
+	private fun tokenForPort(port: Int): String {
+		val candidates = listOf(
+			Path.of(workingDir(), "run", "config", "mc-puppeteer.json"),
+			Path.of(workingDir(), "run-instances", "p$port", "config", "mc-puppeteer.json"),
+		)
+		return candidates.firstNotNullOfOrNull { file ->
+			runCatching {
+				val json = com.google.gson.JsonParser.parseString(Files.readString(file)).asJsonObject
+				// Solo si ese fichero describe ESTE puerto: si no, su token es
+				// de otra instancia y mandarlo seria mandar una credencial ajena.
+				if (json.get("port")?.asInt != port) return@runCatching null
+				json.get("authToken")?.takeIf { !it.isJsonNull }?.asString?.takeIf { it.isNotBlank() }
+			}.getOrNull()
+		}.orEmpty()
+	}
+
+	private fun workingDir(): String = System.getProperty("user.dir") ?: "."
+
+	private class Discovered(val port: Int, val name: String, val token: String)
+
 	private fun routeProxy(exchange: HttpExchange, method: String, path: String) {
 		val rest = path.removePrefix("api/instances/")
 		val slash = rest.indexOf('/')
@@ -233,15 +461,12 @@ class DashboardServer @JvmOverloads constructor(
 				if (query != null) "?$query" else "",
 		)
 
-		val builder = HttpRequest.newBuilder(target)
-			.timeout(Duration.ofMillis(PROXY_TIMEOUT_MS))
-			.header("Accept", "application/json")
-
-		if (instance.token.isNotEmpty()) {
-			// Deliberadamente **no** se reenvia la Authorization del navegador:
-			// la pagina no necesita conocer el token de cada instancia.
-			builder.header("Authorization", "Bearer ${instance.token}")
-		}
+		val builder = authorized(
+			HttpRequest.newBuilder(target)
+				.timeout(Duration.ofMillis(PROXY_TIMEOUT_MS))
+				.header("Accept", "application/json"),
+			instance,
+		)
 
 		val publisher = when (method.uppercase()) {
 			"GET", "DELETE" -> HttpRequest.BodyPublishers.noBody()
@@ -258,8 +483,9 @@ class DashboardServer @JvmOverloads constructor(
 	}
 
 	private fun probe(instance: Instance): ProbeResult = try {
-		val request = HttpRequest.newBuilder(
-			URI("http://${instance.host}:${instance.port}/puppeteer/status"),
+		val request = authorized(
+			HttpRequest.newBuilder(URI("http://${instance.host}:${instance.port}/puppeteer/status")),
+			instance,
 		).timeout(Duration.ofMillis(PROBE_TIMEOUT_MS)).GET().build()
 
 		val response = client.send(request, HttpResponse.BodyHandlers.ofString())
@@ -272,6 +498,26 @@ class DashboardServer @JvmOverloads constructor(
 		}
 	} catch (e: Exception) {
 		ProbeResult(false, null, e.message ?: e.javaClass.simpleName)
+	}
+
+	/**
+	 * Anade el token de la instancia a una peticion saliente.
+	 *
+	 * Lo usan TANTO el sondeo como el proxy, y por eso es una funcion y no una
+	 * linea duplicada: cuando el sondeo se escribio sin cabecera, toda instancia
+	 * con `requireToken=true` (o sea, la configuracion recomendada) aparecia
+	 * como apagada con `HTTP 401` en el panel, aunque la instancia estuviese
+	 * perfectamente viva. El proxy si la mandaba, asi que se veia raro: el chat y
+	 * las acciones funcionaban pero el punto de color de la tarjeta decia que
+	 * no habia nadie.
+	 */
+	private fun authorized(builder: HttpRequest.Builder, instance: Instance): HttpRequest.Builder {
+		if (instance.token.isNotEmpty()) {
+			// Deliberadamente **no** se reenvia la Authorization del navegador:
+			// la pagina no necesita conocer el token de cada instancia.
+			builder.header("Authorization", "Bearer ${instance.token}")
+		}
+		return builder
 	}
 
 	/**
@@ -352,6 +598,15 @@ class DashboardServer @JvmOverloads constructor(
 		const val MAX_BODY_BYTES = 256 * 1024
 		const val PROBE_TIMEOUT_MS = 1_500L
 		const val PROXY_TIMEOUT_MS = 8_000L
+		const val DISCOVERY_TIMEOUT_MS = 400L
+
+		/**
+		 * Rango que se escanea al descubrir. 25580 es el puerto por defecto de
+		 * Puente, asi que el rango arranca ahi y no lo solapa con el del panel
+		 * (25590), que vive por encima.
+		 */
+		const val DEFAULT_SCAN_FROM = 25580
+		const val DEFAULT_SCAN_TO = 25599
 
 		/** El panel va empaquetado como recurso, no en un string gigantic. */
 		private val INDEX: String by lazy {

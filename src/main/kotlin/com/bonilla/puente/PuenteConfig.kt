@@ -36,9 +36,16 @@ data class PuenteConfig(
 		if (chatBufferSize !in 16..65536) problems += "chatBufferSize fuera de rango (16-65536): $chatBufferSize"
 		if (maxBodyBytes !in 256..1_048_576) problems += "maxBodyBytes fuera de rango (256-1048576): $maxBodyBytes"
 		if (requestTimeoutMs !in 100..60_000) problems += "requestTimeoutMs fuera de rango (100-60000): $requestTimeoutMs"
-		if (requireToken && authToken.isBlank()) problems += "requireToken=true pero authToken esta vacio"
 		return problems
 	}
+
+	/**
+	 * `requireToken=true` con `authToken` vacío no es un error: es el estado
+	 * inicial de quien aún no ha generado su token, y el arranque lo genera solo.
+	 * Por eso no se reporta en [validate]. Sí se avisa, pero como información,
+	 * para que el log no grite por algo que se resuelve por sí solo.
+	 */
+	fun tokenFaltaPorGenerar(): Boolean = requireToken && authToken.isBlank()
 
 	companion object {
 		const val DEFAULT_HOST = "127.0.0.1"

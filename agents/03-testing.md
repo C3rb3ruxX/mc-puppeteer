@@ -65,7 +65,7 @@ $cache = "$env:USERPROFILE\.gradle\caches\modules-2\files-2.1"
 $gson   = Get-ChildItem "$cache\com.google.code.gson\gson"  -Recurse -Filter "gson-*.jar"        | Where-Object Name -notmatch 'sources' | Select -First 1
 $slf4j  = Get-ChildItem "$cache\org.slf4j\slf4j-api"        -Recurse -Filter "slf4j-api-*.jar"   | Where-Object Name -notmatch 'sources' | Select -First 1
 $kotlin = Get-ChildItem "$cache\org.jetbrains.kotlin\kotlin-stdlib" -Recurse -Filter "*.jar"   | Where-Object Name -notmatch 'sources' | Select -First 1
-$cp = @("build\classes\kotlin\main", $gson.FullName, $slf4j.FullName, $kotlin.FullName) -join ';'
+$cp = @("build\classes\kotlin\main", "build\resources\main", $gson.FullName, $slf4j.FullName, $kotlin.FullName) -join ';'
 
 $out = "$env:TEMP\puente-smoke-out"
 New-Item -ItemType Directory -Force $out | Out-Null
@@ -86,8 +86,8 @@ que se lanzo Gradle (Java 21 para Minecraft 1.21.5).
 panel encima. No necesita ni Minecraft ni el jar deobfuscado.
 
 ```powershell
-& "C:\Program Files\Java\jdk-25.0.2\bin\javac.exe" -nowarn -cp $full -d "$tmp\out" agents\tests\DashboardSmokeTest.java
-& "C:\Program Files\Java\jdk-25.0.2\bin\java.exe"  -cp "$tmp\out;$full" DashboardSmokeTest
+javac -nowarn -cp $cp -d $out agents\tests\DashboardSmokeTest.java
+java  -cp "$out;$cp" DashboardSmokeTest
 ```
 
 Los dos bancos se pueden compilar y ejecutar seguidos. Los puertos son

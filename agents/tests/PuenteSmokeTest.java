@@ -39,7 +39,27 @@ public class PuenteSmokeTest {
 		check("[2] validate detecta puerto fuera de rango", bad.size() == 1, String.valueOf(bad));
 
 		List<String> noToken = new PuenteConfig(true, "127.0.0.1", 25599, true, "", 256, 1024, 5000L, 4).validate();
-		check("[3] validate detecta token vacio con requireToken", noToken.size() == 1, String.valueOf(noToken));
+		check("[3] token vacio NO es un error de config (se autogenera al arrancar)",
+			noToken.isEmpty(), String.valueOf(noToken));
+
+		PuenteConfig necesitaToken = new PuenteConfig(true, "127.0.0.1", 25599, true, "", 256, 1024, 5000L, 4);
+		check("[4] tokenFaltaPorGenerar() lo detecta aunque validate() no se queje",
+			necesitaToken.tokenFaltaPorGenerar(), "false");
+
+		PuenteConfig yaTiene = new PuenteConfig(true, "127.0.0.1", 25599, true, "t", 256, 1024, 5000L, 4);
+		check("[5] tokenFaltaPorGenerar() es false si ya hay token",
+			!yaTiene.tokenFaltaPorGenerar(), "true");
+
+		PuenteConfig sinAuth = new PuenteConfig(true, "127.0.0.1", 25599, false, "", 256, 1024, 5000L, 4);
+		check("[6] con requireToken=false no se genera nada",
+			!sinAuth.tokenFaltaPorGenerar(), "true");
+
+		// Regresión: applyDefaults() degradaba requireToken a false cuando el
+		// token venía vacío, lo que dejaba muerto el bloque de autogeneración y
+		// abría el puerto sin autenticación pese a que la config la pedía.
+		check("[7] validate() con token vacío deja los otros campos intactos",
+			necesitaToken.getRequireToken(),
+			"requireToken se degradó a false");
 
 		MainThreadExecutor main = new MainThreadExecutor() {
 			private final BlockingQueue<Runnable> queue = new LinkedBlockingQueue<>();
@@ -63,7 +83,7 @@ public class PuenteSmokeTest {
 			String profileUuid = "uuid-1";
 			@Override public ClientStatus status() {
 				onMainThreadCalls.incrementAndGet();
-				return new ClientStatus("1.0.0", "1.21.5", true, "ChatScreen", "Steve", "uuid-1",
+				return new ClientStatus("1.0.0", "26.3", true, "ChatScreen", "Steve", "uuid-1",
 					"localhost:25565", "Mi servidor", null, "minecraft:overworld", 144, 3, 20, true,
 					isDead.get());
 			}

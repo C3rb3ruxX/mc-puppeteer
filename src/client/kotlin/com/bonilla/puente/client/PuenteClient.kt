@@ -40,15 +40,16 @@ object PuenteClient : ClientModInitializer {
 			applyDefaults(config)
 		}
 
-		if (config.requireToken && config.authToken.isBlank()) {
+		// Un token vacío con requireToken=true no es un error de configuración,
+		// es el primer arranque de alguien que aún no lo tiene. Se genera aquí
+		// y se guarda, en vez de degradar silenciosamente a "sin token".
+		if (config.tokenFaltaPorGenerar()) {
 			val generated = generateToken()
 			config.authToken = generated
 			PuenteConfig.save(config)
-			logger.warn(
-				"Se genero un token de autorizacion nuevo. Guardalo: solo se muestra una vez. " +
-					"Usalo como 'Authorization: Bearer <token>'",
-			)
-			logger.warn("TOKEN: {}", generated)
+			logger.info("Primer arranque: se ha generado un token de autorizacion y guardado en la config.")
+			logger.info("El panel web ya lo puede leer de run\\config\\mc-puppeteer.json; si lo pones a mano, usalo como 'Authorization: Bearer <token>'")
+			logger.info("TOKEN: {}", generated)
 		}
 
 		val chatLog = ChatLog(config.chatBufferSize)
@@ -100,7 +101,15 @@ object PuenteClient : ClientModInitializer {
 		if (config.chatBufferSize !in 16..65536) config.chatBufferSize = 256
 		if (config.maxBodyBytes !in 256..1_048_576) config.maxBodyBytes = 16 * 1024
 		if (config.requestTimeoutMs !in 100..60_000L) config.requestTimeoutMs = 5_000L
-		if (config.requireToken && config.authToken.isBlank()) config.requireToken = false
+		// OJO: aquí NO se toca requireToken.
+		//
+		// requireToken=true con authToken vacío no es contradictorio: significa
+		// "quiero token, todavía no lo tengo". Degradarlo a false aquí era
+		// carregar justo lo contrario de lo pedido y, peor, dejaba muerto el
+		// bloque de generación de token de abajo (su condición ya no podía
+		// cumplirse nunca), así que el puerto acababa abierto sin autenticación
+		// y sin más aviso que un ERROR de config. applyDefaults solo sanea
+		// valores no arrancables; de la seguridad se encarga la autogeneración.
 	}
 
 	private fun modVersion(): String =

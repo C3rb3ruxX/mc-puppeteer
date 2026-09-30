@@ -65,6 +65,21 @@ public class DashboardSmokeTest {
 
 			String path = exchange.getRequestURI().getPath();
 			String payload;
+
+			// El stub exige token SIEMPRE, igual que un Puente con
+			// requireToken=true. La unica instancia que apunta a el se registra
+			// con token, asi que el sondeo y el proxy deben mandarlo los dos.
+			// Asi el bug del sondeo sin cabecera salta aqui y no en produccion.
+			if (!("Bearer secreto-123").equals(stubAuth.get())) {
+				byte[] denied = "{\"ok\":false,\"error\":{\"code\":\"unauthorized\"}}"
+					.getBytes(StandardCharsets.UTF_8);
+				exchange.getResponseHeaders().add("Content-Type", "application/json; charset=utf-8");
+				exchange.sendResponseHeaders(401, denied.length);
+				exchange.getResponseBody().write(denied);
+				exchange.close();
+				return;
+			}
+
 			if (path.endsWith("/status")) {
 				payload = "{\"ok\":true,\"data\":{\"inWorld\":true,\"playerName\":\"Bot\","
 					+ "\"dead\":false,\"fps\":60}}";
@@ -132,13 +147,20 @@ public class DashboardSmokeTest {
 				added.body());
 
 			// --- Sondeo: ahora si esta online --------------------------------
+			// Regresion: el sondeo tambien tiene que mandar el token. El stub
+			// devuelve 401 sin el, asi que si probe() se olvidara de la cabecera
+			// esta comprobacion falla y la tarjeta saldria "apagada" con la
+			// instancia perfectamente viva.
 			HttpResponse<String> list2 = get(http, base + "/api/instances");
 			JsonObject stubEntry = JsonParser.parseString(list2.body()).getAsJsonObject()
 				.getAsJsonObject("data").getAsJsonArray("instances").get(1).getAsJsonObject();
-			check("[7] una instancia viva se marca online con su estado",
+			check("[7] una instancia viva Y autenticada se marca online con su estado",
 				stubEntry.get("online").getAsBoolean()
 					&& stubEntry.getAsJsonObject("status").get("playerName").getAsString().equals("Bot"),
 				stubEntry.toString());
+			check("[7b] el sondeo tambien lleva el token (no solo el proxy)",
+				stubEntry.get("online").getAsBoolean(),
+				"sondeo sin Authorization -> " + stubEntry.toString());
 
 			// --- Proxy: GET y POST -------------------------------------------
 			HttpResponse<String> proxied = get(http, base + "/api/instances/p" + stubPort + "/status");
