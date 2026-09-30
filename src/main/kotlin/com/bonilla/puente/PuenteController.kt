@@ -32,6 +32,15 @@ class PuenteController(
 
 	fun status(): ClientStatus = mainThread.callOnMainThread { bridge.status() }
 
+	/**
+	 * Inventario del jugador, con solo las ranuras ocupadas.
+	 *
+	 * Va por [MainThreadBridge] como todo lo que toca el juego: leer el
+	 * contenedor desde un hilo HTTP seria una condicion de carrera con el
+	 * hilo principal, que es quien lo muta al recoger, tirar o crafted.
+	 */
+	fun inventory(): InventorySnapshot = mainThread.callOnMainThread { bridge.inventory() }
+
 	fun players(): List<RemotePlayerInfo> = mainThread.callOnMainThread { bridge.onlinePlayers() }
 
 	fun chat(limit: Int): List<CapturedMessage> = chatLog.drain(limit, all = false)

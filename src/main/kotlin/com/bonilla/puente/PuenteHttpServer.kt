@@ -171,6 +171,13 @@ class PuenteHttpServer(
 				}))
 			}
 
+			// Solo lectura y sin efectos, asi que GET es lo natural. Lanza 409
+			// not_connected si todavia no hay jugador.
+			"/inventory" -> {
+				requireMethod(exchange, "GET")
+				send(exchange, 200, okBody(controller.inventory().toJson()))
+			}
+
 			"/chat" -> when (exchange.requestMethod) {
 				"GET" -> {
 					val limit = queryInt(exchange, "limit", 50, 1, 1000)
@@ -395,6 +402,7 @@ class PuenteHttpServer(
 			add("GET  $BASE_PATH/status")
 			add("GET  $BASE_PATH/debug")
 			add("GET  $BASE_PATH/players")
+			add("GET  $BASE_PATH/inventory")
 			add("GET  $BASE_PATH/chat?limit=N")
 			add("GET  $BASE_PATH/chat/history?limit=N")
 			add("POST $BASE_PATH/chat      { \"message\": \"hola\" }")

@@ -20,12 +20,26 @@ red de pruebas) que:
 1. construye un `MinecraftBridge` **falso** que solo registra en que hilo se
    le llamo,
 2. levanta un `PuenteHttpServer` real en `127.0.0.1:25599`,
-3. le manda 179 peticiones con `java.net.http.HttpClient`,
+3. le manda 305 peticiones con `java.net.http.HttpClient` y hace 187
+   comprobaciones,
 4. comprueba estado HTTP, codigo de error y contenido,
 5. comprueba que el buffer acotado se comporta,
 6. comprueba que los comandos de Baritone se traducen y salen por chat,
 7. comprueba que el limitador de tasa corta,
 8. apaga el servidor.
+
+Los dos numeros de arriba estan medidos, no puestos a ojo, y hay que volver a
+medirlos al anadir comprobaciones:
+
+```bash
+java -cp "$out:$cp" PuenteSmokeTest | grep -cE '^(PASA|FALLA)'   # -> 187
+```
+
+Para las peticiones hay que contar dentro del propio test: un contador en el
+helper `call(...)`, que es el unico sitio por el que pasan todas, impreso con el
+resumen. Ojo con el `[n]` que lleva cada linea: es un contador **manual** que se
+incrementa a mano en el test, no el numero de comprobaciones, asi que `[156]` con
+187 comprobaciones es normal y no hay que "arreglarlo".
 
 ### Compilar y ejecutar (Linux / macOS)
 
@@ -83,7 +97,7 @@ coincide con el del fichero (`PuenteSmokeTest`), que es lo que exige Java
 para una clase publica; el comando de arriba invoca ese nombre.
 
 Hubo antes una copia en `%TEMP%\opencode\SmokeTest.java` con el nombre corto
-`SmokeTest`. Esa variante daba 179/179 igual, pero rompia el comando documentado
+`SmokeTest`. Esa variante hacia las mismas comprobaciones, pero rompia el comando documentado
 en cuanto se copiaba al repositorio, porque `javac` no acepta una clase
 publica cuyo nombre no coincida con el del `.java`. Se renombro al integrarla.
 
@@ -107,9 +121,19 @@ publica cuyo nombre no coincida con el del `.java`. Se renombro al integrarla.
 - `/status` con token correcto devuelve `200` y el estado completo.
 - Token incorrecto devuelve `401`.
 
-### Lectura (2)
+### Lectura (5)
 - `/players` devuelve el tab list.
 - `/debug` responde.
+- `/status` lleva vida, vida maxima, comida y saturacion.
+- `/status` lleva la posicion con decimales.
+- `/status` lleva el nivel y el progreso de experiencia.
+
+### Inventario (5)
+- `GET /inventory` -> `200` con las ranuras ocupadas.
+- Manda `id`, `name`, `count` y `slot` de cada item.
+- No incluye las ranuras vacias (lo comprueba el puente real; aqui, el envoltorio).
+- `POST /inventory` -> `405`: es de solo lectura.
+- `GET /inventory` sin mundo -> `409 not_connected`.
 
 ### Envio de chat (4)
 - `{"message":"hola desde http"}` devuelve `202` y el texto enviado.

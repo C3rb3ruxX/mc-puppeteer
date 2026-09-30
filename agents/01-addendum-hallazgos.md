@@ -150,7 +150,7 @@ funcione**. Hay que resolver el valor o lanzar excepcion.
 
 ## 6. Correcciones que salio la prueba de humo
 
-Las ejecuto `agents/tests/PuenteSmokeTest.java` (156 aserciones: las 48 de la
+Las ejecuto `agents/tests/PuenteSmokeTest.java` (187 aserciones: las 48 de la
 primera tanda mas las que se fueron añadeendo con cada endpoint nuevo). Dos
 fallos eran bugs reales del nucleo, no de la prueba:
 

@@ -1,6 +1,8 @@
 package com.bonilla.puente.client
 
 import com.bonilla.puente.ClientStatus
+import com.bonilla.puente.InventorySnapshot
+import com.bonilla.puente.ItemStackInfo
 import com.bonilla.puente.MinecraftBridge
 import com.bonilla.puente.PlayerIdentity
 import com.bonilla.puente.PuenteException
@@ -13,6 +15,7 @@ import net.minecraft.client.gui.screens.TitleScreen
 import net.minecraft.client.multiplayer.ServerData
 import net.minecraft.client.multiplayer.resolver.ServerAddress
 import net.minecraft.core.UUIDUtil
+import net.minecraft.core.registries.BuiltInRegistries
 import net.minecraft.network.chat.Component
 import org.slf4j.Logger
 import java.util.Optional
@@ -39,6 +42,18 @@ import java.util.Optional
  *   `LEGACY` es el de las cuentas sin autenticar (ver [setPlayerName]).
  * - `GameProfile` es una clase con getters (`getName()`/`getId()`), no un record
  *   como en 26.x, asi que Kotlin los expone como propiedades.
+ * - `Entity.x`/`y`/`z` **ya no son campos publicos** en 1.21.5: la posicion vive
+ *   en `Entity.position` (un `Vec3`) y se lee con los getters finales `getX()`,
+ *   `getY()` y `getZ()`. Lo mismo con la vida (`LivingEntity.getHealth()` /
+ *   `getMaxHealth()`), de modo que en Kotlin se escriban igual que antes: como
+ *   propiedades, sin parentesis.
+ * - `Player.experienceLevel` y `Player.experienceProgress`, en cambio, **si** son
+ *   campos publicos (y no getters). La comida no esta en el jugador: se lee de
+ *   `Player.getFoodData()`, y `FoodData` es una clase top-level en
+ *   `net.minecraft.world.food`. No existe ningun `isHungry()`.
+ * - `Inventory` ya no expone `items`/`armor`/`offhand` como campos: hay que usar
+ *   `getContainerSize()` y `getItem(i)`, que enruta 0..35 al inventario y la
+ *   barra, 36..39 a la armadura y 40 a la mano secundaria (ver [inventory]).
  *
  * TODOS los metodos se invocan desde el hilo principal de juego: lo garantiza
  * `MainThreadBridge`, que los agenda con `Minecraft.execute`.
@@ -75,7 +90,59 @@ class ClientBridge(
 			maxPlayers = serverData?.players?.max() ?: 0,
 			windowActive = mc.isWindowActive,
 			dead = player != null && !player.isAlive(),
+			// Los vitales se leen con `?:` para no tener que repetir el `player
+			// != null` en cada campo: sin jugador (menu de titulo, pantalla de
+			// conexion) se mandan los valores neutros del DTO.
+			health = player?.health ?: 0f,
+			maxHealth = player?.maxHealth ?: 20f,
+			food = player?.foodData?.foodLevel ?: 0,
+			saturation = player?.foodData?.saturationLevel ?: 0f,
+			// `Entity.x/y/z` ya no son campos publicos en 1.21.5: la posicion vive
+			// en `Entity.position` (un `Vec3`) y se lee con los getters finales
+			// `getX()`/`getY()`/`getZ()` (verificado con javap). En Kotlin siguen
+			// escribiendose como propiedades.
+			x = player?.x ?: 0.0,
+			y = player?.y ?: 0.0,
+			z = player?.z ?: 0.0,
+			// A diferencia de la vida, esto si son campos publicos sin parentesis
+			// (`Player.experienceLevel`, `.experienceProgress`), no getters.
+			xpLevel = player?.experienceLevel ?: 0,
+			xpProgress = player?.experienceProgress ?: 0f,
 		)
+	}
+
+	override fun inventory(): InventorySnapshot {
+		val mc = Minecraft.getInstance()
+		// Mismo criterio que [status]: sin jugador no hay inventario que leer, y
+		// es un 409 y no un 500, porque no es un fallo del mod.
+		val player = mc.player
+			?: throw PuenteException(409, "not_connected", "El cliente no esta en ningun mundo")
+
+		val inventory = player.inventory
+		val items = ArrayList<ItemStackInfo>()
+		for (slot in 0 until inventory.containerSize) {
+			// `Inventory.getItem(i)` enruta el indice: 0..35 al inventario y la
+			// barra rapida (0..8 = barra, 9..35 = inventario), 36..39 a la
+			// armadura y 40 a la mano secundaria. Devuelve `ItemStack.EMPTY`
+			// (no `null`) fuera de rango.
+			val stack = inventory.getItem(slot)
+			// `ItemStack.isEmpty` es metodo, no campo: en Kotlin se escribe sin
+			// parenteses, pero conviene recordarlo para no escribir `stack.isEmpty`.
+			if (stack.isEmpty) continue
+
+			items += ItemStackInfo(
+				// `getKey` devuelve la `ResourceLocation` del registro (`minecraft:oak_log`),
+				// que es el identificador estable con el que se programan las recetas.
+				id = BuiltInRegistries.ITEM.getKey(stack.item).toString(),
+				// `hoverName` es el nombre ya traducido por el idioma del cliente
+				// ("Tronco de roble"); su getter es `getString()`.
+				name = stack.hoverName.string,
+				count = stack.count,
+				slot = slot,
+			)
+		}
+
+		return InventorySnapshot(items)
 	}
 
 	override fun respawn() {

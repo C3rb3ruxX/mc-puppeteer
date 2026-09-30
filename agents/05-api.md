@@ -74,6 +74,7 @@ esperas, un `null` en `screen` es normal, no un error.
 | `GET` | `/health` | Vivo y uptime. **Sin token.** |
 | `GET` | `/status` | Estado completo del cliente, mundo, FPS, pantalla. |
 | `GET` | `/players` | Jugadores del tab list con su latencia. |
+| `GET` | `/inventory` | Que lleva el jugador: solo las ranuras ocupadas. |
 | `GET` | `/chat?limit=N` | Lee el chat pendiente y **lo consume**. |
 | `GET` | `/chat/history?limit=N` | Copia del historial **sin consumir**. |
 | `POST` | `/chat` | Envia un mensaje de chat. |
@@ -138,7 +139,17 @@ curl.exe -s "$BASE/status" -H $AUTH
     "fps": 142,
     "playerCount": 3,
     "maxPlayers": 20,
-    "windowActive": true
+    "windowActive": true,
+    "dead": false,
+    "health": 18.0,
+    "maxHealth": 20.0,
+    "food": 17,
+    "saturation": 4.5,
+    "x": 123.456,
+    "y": 71.0,
+    "z": -45.5,
+    "xpLevel": 7,
+    "xpProgress": 0.25
   }
 }
 ```
@@ -146,6 +157,29 @@ curl.exe -s "$BASE/status" -H $AUTH
 `screen` lleva el identificador de la pantalla de menus abierta (`titleScreen`,
 `pauseScreen`, `chatScreen`, ...); con el juego limpio es `null`. `inWorld`
 es el campo que de verdad dice si puedes mandar chat o no.
+
+#### Vitales y posicion
+
+Ademas del estado de la sesion, `data` lleva lo que el panel necesita para no
+tener que preguntar por otra parte:
+
+| Campo | Tipo | Que es |
+|---|---|---|
+| `health` | numero | Vida actual, en medios corazones: `20` = 10 corazones. |
+| `maxHealth` | numero | Vida maxima. `20` es lo normal; la suben los efectos. |
+| `food` | entero | Comida de 0 a 20. A `20` la barra esta llena. |
+| `saturation` | numero | Saturacion de 0 a 20: cuanto aguanta sin comer. |
+| `x`, `y`, `z` | numero | Posicion del jugador **con decimales**. |
+| `xpLevel` | entero | Nivel de experiencia. |
+| `xpProgress` | numero | Progreso dentro del nivel, de 0 a 1. |
+| `dead` | booleano | `true` si hay jugador y tiene 0 de vida. |
+
+Todos van como numeros planos, nunca como `null`. Cuando no hay jugador (menu de
+titulo, pantalla de conexion) se mandan los valores neutros: `health` `0`,
+`maxHealth` `20`, `food` `0`, `saturation` `0`, coordenadas a `0` y experiencia a
+`0`. Por eso `inWorld` sigue siendo el campo que hay que mirar antes de fiarse de
+los vitales: un `health` de 0 con `inWorld` `false` quiere decir "no hay
+jugador", no "esta muerto". Para eso esta `dead`, que si distingue los dos casos.
 
 ### `GET /players`
 
@@ -163,6 +197,59 @@ curl.exe -s "$BASE/players" -H $AUTH
   }
 }
 ```
+
+### `GET /inventory`
+
+Que lleva el jugador encima. Solo lectura y sin efectos, asi que es un `GET`
+normal.
+
+```powershell
+curl.exe -s "$BASE/inventory" -H $AUTH
+```
+
+```json
+{
+  "ok": true,
+  "data": {
+    "items": [
+      { "id": "minecraft:oak_log", "name": "Tronco de roble", "count": 12, "slot": 4 },
+      { "id": "minecraft:bread", "name": "Pan", "count": 5, "slot": 8 },
+      { "id": "minecraft:diamond_pickaxe", "name": "Pico de diamante", "count": 1, "slot": 40 }
+    ]
+  }
+}
+```
+
+Cada entrada es una ranura **ocupada**:
+
+| Campo | Que es |
+|---|---|
+| `id` | Identificador del item en el registro: `minecraft:oak_log`. Es el que se usa para pedir cantidades concreteas. |
+| `name` | Nombre ya traducido por el idioma del cliente: `Tronco de roble`. |
+| `count` | Unidades en esa ranura, no en todo el inventario. |
+| `slot` | Indice de la ranura dentro del contenedor del jugador. |
+
+**Solo van las ranuras con algo dentro.** El contenedor tiene 41 ranuras y
+mandar 41 objetos en cada consulta seria ruido: casi todos serian vacios. Un
+inventario de madera y pico se lee con tres lineas, no con cuarenta.
+
+El reparto de `slot` es el del contenedor del jugador, no el de la pantalla de
+inventario:
+
+| Rango | Que es |
+|---|---|
+| `0`-`8` | Barra rapida (las nueve de abajo). |
+| `9`-`35` | Inventario principal (27 ranuras). |
+| `36`-`39` | Armadura: botas, leggings, peto y casco, en ese orden. |
+| `40` | Mano secundaria (por ejemplo, un escudo). |
+
+Si la ranura esta vacia no aparece, asi que un `slot` que no se ve es que no hay
+nada ahi: no se puede deducir que esta vacia por no aparecer, porque tampoco
+aparecen las 41 ranuras de referencia.
+
+Con el inventario sin nada dentro la respuesta es `{"ok":true,"data":{"items":[]}}`
+(no un error). Sin mundo o sin jugador sale `409 not_connected`: el contenedor
+pertenece al `LocalPlayer`, y sin el no hay nada que leer.
 
 ### `GET /chat?limit=N`
 

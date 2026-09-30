@@ -46,6 +46,18 @@ interface MinecraftBridge {
 	 */
 	fun respawn()
 
+	/**
+	 * Inventario del jugador en el hilo principal: una entrada por ranura
+	 * **ocupada**.
+	 *
+	 * Solo se devuelven las ranuras con algo dentro (ver [InventorySnapshot]): el
+	 * contenedor tiene 41 ranuras y mandar 41 objetos en cada consulta seria
+	 * ruido puro para quien lee, que lo que quiere es lo que lleva encima.
+	 *
+	 * Falla con `409 not_connected` si todavia no hay jugador.
+	 */
+	fun inventory(): InventorySnapshot
+
 	/** Jugadores actualmente en el tab list. */
 	fun onlinePlayers(): List<RemotePlayerInfo>
 
@@ -111,6 +123,28 @@ data class ClientStatus(
 	val windowActive: Boolean,
 	/** `true` si hay jugador y tiene 0 de vida. Permite encadenar con `/respawn`. */
 	val dead: Boolean = false,
+	/**
+	 * Vida actual, en medios corazones (`20` = 10 corazones).
+	 *
+	 * `0` cuando no hay jugador: se manda como numero plano, no como `null`.
+	 */
+	val health: Float = 0f,
+	/** Vida maxima del jugador. `20` es el valor normal; lo suben los efectos. */
+	val maxHealth: Float = 20f,
+	/** Puntos de comida, de 0 a 20 (`20` =barra llena). */
+	val food: Int = 0,
+	/** Saturacion de la comida, de 0 a 20. Determina cuanto aguanta sin comer. */
+	val saturation: Float = 0f,
+	/** Coordenada X del jugador, con decimales. `0` si no hay jugador. */
+	val x: Double = 0.0,
+	/** Coordenada Y (altura) del jugador, con decimales. `0` si no hay jugador. */
+	val y: Double = 0.0,
+	/** Coordenada Z del jugador, con decimales. `0` si no hay jugador. */
+	val z: Double = 0.0,
+	/** Nivel de experiencia (`totalExperience / xpProgress` dan la barra). */
+	val xpLevel: Int = 0,
+	/** Progreso dentro del nivel actual, de 0 a 1. */
+	val xpProgress: Float = 0f,
 ) {
 	fun toJson(): JsonObject = JsonObject().apply {
 		addProperty("modVersion", modVersion)
@@ -128,6 +162,51 @@ data class ClientStatus(
 		addProperty("maxPlayers", maxPlayers)
 		addProperty("windowActive", windowActive)
 		addProperty("dead", dead)
+		addProperty("health", health)
+		addProperty("maxHealth", maxHealth)
+		addProperty("food", food)
+		addProperty("saturation", saturation)
+		addProperty("x", x)
+		addProperty("y", y)
+		addProperty("z", z)
+		addProperty("xpLevel", xpLevel)
+		addProperty("xpProgress", xpProgress)
+	}
+}
+
+/**
+ * Un item del inventario, tal y como estaba en su ranura.
+ *
+ * @param slot indice de la ranura en el contenedor del jugador (ver
+ * [InventorySnapshot.items] para el reparto de indices).
+ */
+data class ItemStackInfo(
+	val id: String,
+	val name: String,
+	val count: Int,
+	val slot: Int,
+) {
+	fun toJson(): JsonObject = JsonObject().apply {
+		addProperty("id", id)
+		addProperty("name", name)
+		addProperty("count", count)
+		addProperty("slot", slot)
+	}
+}
+
+/**
+ * Foto del inventario del jugador.
+ *
+ * @param items **solo** las ranuras ocupadas, en orden de indice de ranura. El
+ * contenedor tiene 41 ranuras (36 de inventario + 4 de armadura + 1 de mano
+ * secundaria) y devolverlas todas haria que cada respuesta trajese 41
+ * entradas, la mayoria vacias, para quien lo consume.
+ */
+data class InventorySnapshot(
+	val items: List<ItemStackInfo>,
+) {
+	fun toJson(): JsonObject = JsonObject().apply {
+		add("items", JsonArray().apply { items.forEach { add(it.toJson()) } })
 	}
 }
 

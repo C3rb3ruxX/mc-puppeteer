@@ -60,7 +60,19 @@ public class PuenteSmokeTest {
 				onMainThreadCalls.incrementAndGet();
 				return new ClientStatus("1.0.0", "1.21.5", true, "ChatScreen", "Steve", "uuid-1",
 					"localhost:25565", "Mi servidor", null, "minecraft:overworld", 144, 3, 20, true,
-					isDead.get());
+					isDead.get(), 18f, 20f, 17, 4.5f, 1.5, 64.0, -2.5, 3, 0.5f);
+			}
+			@Override public InventorySnapshot inventory() {
+				onMainThreadCalls.incrementAndGet();
+				checkOnMain("inventory");
+				if (!inWorld.get()) {
+					throw new PuenteException(409, "not_connected", "El cliente no esta en ningun mundo");
+				}
+				// Dos ranuras ocupadas y las demas vacias: es justo el caso que
+				// `ClientBridge` filtra antes de serializar.
+				return new InventorySnapshot(List.of(
+					new ItemStackInfo("minecraft:oak_log", "Tronco de roble", 12, 4),
+					new ItemStackInfo("minecraft:shield", "Escudo", 1, 40)));
 			}
 			@Override public void sendChat(String m) {
 				onMainThreadCalls.incrementAndGet();
@@ -153,6 +165,15 @@ public class PuenteSmokeTest {
 		r = call("GET", "/status", null, true);
 		check("[8] /status con token -> 200", r.status() == 200, r.body());
 		check("[9] status incluye inWorld y fps", r.body().contains("\"inWorld\":true") && r.body().contains("\"fps\":144"), r.body());
+		// Vitales y posicion: sin ellos el panel tiene que adivinar el estado del
+		// personaje. Van como numeros planos, nunca como null.
+		check("[9a] status incluye vida, comida y saturacion",
+			r.body().contains("\"health\":18.0") && r.body().contains("\"maxHealth\":20.0")
+				&& r.body().contains("\"food\":17") && r.body().contains("\"saturation\":4.5"), r.body());
+		check("[9b] status incluye posicion con decimales",
+			r.body().contains("\"x\":1.5") && r.body().contains("\"y\":64.0") && r.body().contains("\"z\":-2.5"), r.body());
+		check("[9c] status incluye experiencia",
+			r.body().contains("\"xpLevel\":3") && r.body().contains("\"xpProgress\":0.5"), r.body());
 
 		r = call("GET", "/status", null, "token incorrecto");
 		check("[10] /status con token erroneo -> 401", r.status() == 401, r.body());
@@ -163,6 +184,36 @@ public class PuenteSmokeTest {
 
 		r = call("GET", "/debug", null, true);
 		check("[12] /debug -> 200", r.status() == 200, r.body());
+
+		// --- inventario ------------------------------------------------------
+		inWorld.set(true);
+
+		r = call("GET", "/inventory", null, true);
+		check("[12a] /inventory -> 200 con las ranuras ocupadas",
+			r.status() == 200 && r.body().contains("\"items\""), r.body());
+		check("[12b] /inventory manda id, name, count y slot de cada item",
+			r.body().contains("\"id\":\"minecraft:oak_log\"")
+				&& r.body().contains("\"name\":\"Tronco de roble\"")
+				&& r.body().contains("\"count\":12")
+				&& r.body().contains("\"slot\":4")
+				&& r.body().contains("\"slot\":40"), r.body());
+		// El puente falso devuelve 2 de 41 ranuras: la comprobacion de que solo
+		// van las ocupadas la hace `ClientBridge`, que es quien tiene el
+		// contenedor; aqui se comprueba el envoltorio y que la ruta existe.
+		check("[12c] /inventory no incluye ranuras vacias",
+			r.body().indexOf("minecraft:oak_log") < r.body().indexOf("minecraft:shield"), r.body());
+
+		r = call("POST", "/inventory", "{}", true);
+		check("[12d] POST /inventory -> 405, el inventario es de solo lectura",
+			r.status() == 405 && r.header("allow") != null, r.status() + " allow=" + r.header("allow"));
+
+		// Sin mundo no hay jugador, y sin jugador no hay contenedor.
+		inWorld.set(false);
+		r = call("GET", "/inventory", null, true);
+		check("[12e] /inventory sin mundo -> 409 not_connected",
+			r.status() == 409 && r.body().contains("not_connected"), r.status() + " " + r.body());
+		// Se deja como estaba (sin mundo): /respawn lo espera asi mas adelante.
+		inWorld.set(false);
 
 		// --- envio ----------------------------------------------------------
 		r = call("POST", "/chat", "{\"message\":\"hola desde http\"}", true);
@@ -619,7 +670,9 @@ public class PuenteSmokeTest {
 			onMainThreadCalls.get() + " llamadas");
 		n++;
 		// 10 base + 7 de /profile + 3 de /connect sin puerto + 6 de /respawn y /status
-		// + las de Baritone.
+		// + 2 de /inventory + las de Baritone.
+		// De /inventory llegan 2: el GET con mundo y el GET sin mundo. El POST que
+		// da 405 se corta en el router, antes de tocar el puente.
 		// De /profile llegan 7: 2 GET + 2 POST validos + 3 POST con nombre de
 		// formato invalido. Los 3 si pasan por el puente a proposito, porque el
 		// patron de nombre se valida en `ClientBridge` (que es quien conoce
@@ -629,8 +682,8 @@ public class PuenteSmokeTest {
 		// De /respawn llegan 6: 4 POST (2 rechazados + 1 bueno + 1 repetido) y 2 GET
 		// /status. El GET /respawn es 405 y no llega al puente.
 		int profileCalls = 7 + 3 + 6;
-		check("[" + n + "] llamadas al puente = 10 base + " + profileCalls + " de perfil/connect + " + dispatched + " de Baritone",
-			onMainThreadCalls.get() == 10 + profileCalls + dispatched, String.valueOf(onMainThreadCalls.get()));
+		check("[" + n + "] llamadas al puente = 10 base + " + profileCalls + " de perfil/connect + 2 de /inventory + " + dispatched + " de Baritone",
+			onMainThreadCalls.get() == 10 + profileCalls + 2 + dispatched, String.valueOf(onMainThreadCalls.get()));
 		n++;
 
 		server.stop();
