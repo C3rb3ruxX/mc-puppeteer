@@ -1,6 +1,7 @@
 import com.bonilla.puente.dashboard.DashboardServer;
 import com.bonilla.puente.dashboard.InstanceRegistry;
 import com.bonilla.puente.http.Json;
+import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.sun.net.httpserver.HttpServer;
@@ -234,23 +235,96 @@ public class DashboardSmokeTest {
 			check("[19] las instancias sobreviven a un reinicio del hub", persisted == 2,
 				"persistidas=" + persisted);
 
-			// --- Borrado -----------------------------------------------------
-			// El hub vuelve a arrancar; como el puerto es efimero, cambia.
-			hub = new DashboardServer(registry, 0);
-			hubPort = hub.start();
-			String base2 = "http://127.0.0.1:" + hubPort;
+		// --- Broadcast -------------------------------------------------------
+		// El hub vuelve a arrancar; como el puerto es efimero, cambia.
+		hub = new DashboardServer(registry, 0);
+		hubPort = hub.start();
+		String base2 = "http://127.0.0.1:" + hubPort;
 
-			HttpResponse<String> removed = http.send(
-				HttpRequest.newBuilder(URI.create(base2 + "/api/instances/p" + stubPort))
-					.method("DELETE", HttpRequest.BodyPublishers.noBody()).build(),
-				HttpResponse.BodyHandlers.ofString());
-			int after = JsonParser.parseString(get(http, base2 + "/api/instances").body())
-				.getAsJsonObject().getAsJsonObject("data").getAsJsonArray("instances").size();
-			check("[20] quitar una instancia la saca del listado",
-				removed.statusCode() == 200 && after == 1,
-				"borrado=" + removed.statusCode() + " quedan=" + after);
+		// Regresion: esto va con el stub VIVO, ANTES del DELETE de mas abajo.
+		// Con solo la instancia apagada, un broadcast que montase mal la ruta
+		// pasaria el mismo: da igual mandar `/puppeteer/chat` que
+		// `/puppeteerchat`, las dos acaban en error de conexion y el test verde.
+		// La ruta es lo unico que distingue un caso del otro.
+		stubPath.set("(nunca)");
+		JsonParser.parseString(
+			post(http, base2 + "/api/broadcast/chat", "{\"message\":\"hola\"}").body());
+		check("[21] el broadcast monta bien la ruta en la instancia viva",
+			stubPath.get().equals("/puppeteer/chat"),
+			"ruta que llego a la instancia=" + stubPath.get()
+				+ " (si sale /puppeteerchat falta la barra de separacion)");
 
-		} finally {
+		// --- Borrado -----------------------------------------------------
+		HttpResponse<String> removed = http.send(
+
+			HttpRequest.newBuilder(URI.create(base2 + "/api/instances/p" + stubPort))
+				.method("DELETE", HttpRequest.BodyPublishers.noBody()).build(),
+			HttpResponse.BodyHandlers.ofString());
+		int after = JsonParser.parseString(get(http, base2 + "/api/instances").body())
+			.getAsJsonObject().getAsJsonObject("data").getAsJsonArray("instances").size();
+		check("[20] quitar una instancia la saca del listado",
+			removed.statusCode() == 200 && after == 1,
+			"borrado=" + removed.statusCode() + " quedan=" + after);
+
+
+		JsonObject bcast = JsonParser.parseString(
+			post(http, base2 + "/api/broadcast/chat", "{\"message\":\"hola\"}").body())
+			.getAsJsonObject().getAsJsonObject("data");
+		JsonArray results = bcast.getAsJsonArray("results");
+		// Tras el DELETE solo queda la instancia por defecto, que esta apagada:
+		// el broadcast tiene que llegar a ella y reportar el fallo, no reventar.
+		boolean bcastReports = bcast.get("total").getAsInt() == 1
+			&& results.size() == 1
+			&& !results.get(0).getAsJsonObject().get("ok").getAsBoolean();
+		check("[22] el broadcast llega a todas y reporta una por una", bcastReports,
+			"total=" + bcast.get("total") + " results=" + results);
+
+		JsonObject noRoute = JsonParser.parseString(
+			post(http, base2 + "/api/broadcast/", "{}").body()).getAsJsonObject();
+		check("[23] broadcast sin ruta -> 400 y no se reenvia a ninguna",
+			noRoute.getAsJsonObject().get("ok").getAsBoolean() == false,
+			"respuesta=" + noRoute);
+
+		// --- Descubrimiento -------------------------------------------------
+
+		HttpResponse<String> disc = post(http, base2 + "/api/discover", "{}");
+		JsonObject discData = JsonParser.parseString(disc.body())
+			.getAsJsonObject().getAsJsonObject("data");
+		check("[24] descubrir responde 200 con los puertos escaneados",
+			disc.statusCode() == 200 && discData.has("scanned") && discData.has("added"),
+			"scanned=" + (discData.has("scanned") ? discData.get("scanned") : "?"));
+
+		// --- Lanzador -------------------------------------------------------
+
+		JsonObject launcherState = JsonParser.parseString(get(http, base2 + "/api/launcher").body())
+			.getAsJsonObject().getAsJsonObject("data");
+		check("[25] el lanzador informa del rango permitido y si esta compilado",
+			launcherState.get("from").getAsInt() == 25580 && launcherState.get("to").getAsInt() == 25599
+				&& launcherState.has("ready"),
+			"state=" + launcherState);
+
+		// Un puerto fuera de la lista blanca tiene que rechazarse ANTES de
+		// arrancar nada: es la barrera que impide que el panel sea un lanzador
+		// de procesos arbitrario.
+		HttpResponse<String> badPort = post(http, base2 + "/api/launch", "{\"port\":1234}");
+		JsonObject badErr = JsonParser.parseString(badPort.body()).getAsJsonObject().getAsJsonObject("error");
+		check("[26] lanzar en un puerto fuera de rango se rechaza",
+			badPort.statusCode() == 400 && badErr.get("code").getAsString().equals("launch_failed"),
+			"status=" + badPort.statusCode() + " err=" + badErr);
+
+		HttpResponse<String> noPort = post(http, base2 + "/api/launch", "{}");
+		check("[27] lanzar sin puerto -> 400", noPort.statusCode() == 400,
+			"status=" + noPort.statusCode());
+
+		// Parar algo que el hub no ha arrancado no es un error: es un "no" claro.
+		HttpResponse<String> stopFree = post(http, base2 + "/api/stop", "{\"port\":25583}");
+		JsonObject stopData = JsonParser.parseString(stopFree.body()).getAsJsonObject().getAsJsonObject("data");
+		check("[28] parar una instancia que el hub no arranco no hace nada",
+			stopFree.statusCode() == 200 && !stopData.get("stopped").getAsBoolean(),
+			"data=" + stopData);
+
+	} finally {
+
 			hub.stop();
 			stub.stop(0);
 			Files.deleteIfExists(file);

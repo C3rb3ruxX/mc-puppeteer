@@ -10,6 +10,17 @@ La logica de este mod esta partida en dos, y eso determina como se prueba cada p
 La prueba de humo cubre todo el nucleo, incluida la garantia central del mod:
 **que nada se ejecuta fuera del hilo principal**.
 
+Hay dos bancos, y los dos se ejecutan con `java` directamente:
+
+| Banco | Aserciones | Que necesita |
+|---|---|---|
+| `PuenteSmokeTest` | 195 | Nada, solo el JDK y el classpath del proyecto |
+| `DashboardSmokeTest` | 29 | Nada, levanta un stub HTTP |
+
+224 en total. Ojo con la cuenta: el numero mas alto de la etiqueta no es el
+total. En `PuenteSmokeTest` las etiquetas llegan a `[156]`, pero hay 35
+aserciones mas con sufijo de letra (`[26a]`, `[27b]`…), asi que son 195.
+
 ---
 
 ## 1. Como se ejecuta
@@ -53,7 +64,7 @@ java -cp "$out:$cp" PuenteSmokeTest
 
 Sale con codigo de salida 1 si algo falla, asi que sirve directamente en CI.
 
-Aparte, `tests/DashboardSmokeTest.java` prueba el panel de instancias (21
+Aparte, `tests/DashboardSmokeTest.java` prueba el panel de instancias (29
 aserciones) con un stub que hace de Puente; no necesita Minecraft.
 
 ### Compilar y ejecutar (Windows / PowerShell)
@@ -172,7 +183,7 @@ Lo que **no** cubren: que los ids y los nombres sean los de verdad. El fake
 inventa `minecraft:diamond_pickaxe`; que `BuiltInRegistries.ITEM.getKey` devuelva
 la ruta correcta solo se comprueba dentro del juego.
 
-### Panel de instancias (20)
+### Panel de instancias (29)
 En `agents/tests/DashboardSmokeTest.java`, con un stub que hace de Puente:
 
 - El panel se sirve como HTML y **sin** cabeceras CORS.
@@ -188,6 +199,34 @@ En `agents/tests/DashboardSmokeTest.java`, con un stub que hace de Puente:
   poner esa cabecera a mano, y ademas se verifica que una peticion normal si pasa,
   para que el test no se conforme con un 403 universal.
 - El registro sobrevive a un reinicio del hub, y `DELETE` saca la instancia.
+- Descubrir responde 200 con los puertos escaneados.
+- El lanzador informa del rango permitido y de si el proyecto esta listo; lanzar
+  fuera de rango o sin puerto se rechaza, y parar una instancia que el hub no
+  arranco no hace nada.
+
+#### Regresion del broadcast
+
+`POST /api/broadcast/chat` devolvia `404 Endpoint desconocido: /puppeteerchat` en
+las dos instancias. La cola de la ruta se montaba sin su barra: el hub hacia
+`removePrefix("api/broadcast/")`, que quita tambien la `/` final, y `forward()`
+concatena a pelo, asi que salia `/puppeteer` + `chat`.
+
+El banco **no lo cazaba** porque el broadcast se probaba cuando ya solo quedaba la
+instancia por defecto, que esta apagada. Da igual mandar `/puppeteer/chat` que
+`/puppeteerchat`: las dos acaban en error de conexion y el test pasa igual de
+verde. Por eso ahora la asercion va **con el stub vivo y antes del `DELETE`**,
+comprobando la ruta que llego de verdad (`stubPath`):
+
+```java
+stubPath.set("(nunca)");
+post(http, base2 + "/api/broadcast/chat", "{\"message\":\"hola\"}");
+check("[21] el broadcast monta bien la ruta en la instancia viva",
+    stubPath.get().equals("/puppeteer/chat"), ...);
+```
+
+La leccion general: un test de proxy que solo mira el codigo HTTP no distingue
+una ruta bien montada de una mal montada si el destino no responde. Hay que
+mirar **a donde fue la peticion**, no solo que fallo.
 
 Un fallo que solo aparecio al ejecutarlo de verdad, no en el banco: con un
 registro en un path relativo sin carpeta, `Files.createDirectories(file.parent)`
@@ -196,6 +235,14 @@ lanza NPE porque `parent` es `null`. El banco no lo cazaba porque usaba
 
 Lo que **no** cubren: el JavaScript del panel (no hay pruebas de navegador) ni
 el comportamiento con muchas instancias simultaneas.
+
+Lo del JavaScript se ha tapado a mano, no con pruebas: en esta maquina no hay ni
+`node` ni navegador, asi que el `index.html` se reviso con un validador de
+equilibrio de llaves que entiende comentarios, comillas, plantillas y regex
+(`{`/`}`/`(`/`)` balanceados, 587 lineas de JS), y cruzando cada `data-act` y
+cada `id` que el JS busca contra lo que el HTML define. Es un control
+estructural, **no** una ejecucion: no caza un `const x = ;` ni un nombre de
+propiedad mal escrito. Para eso hay que abrir el panel en un navegador.
 
 ### Identidad offline (10) y reaparicion (10)
 - `GET /profile` devuelve nombre y UUID actuales.

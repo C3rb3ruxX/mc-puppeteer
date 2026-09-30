@@ -52,6 +52,7 @@ class DashboardServer @JvmOverloads constructor(
 	private val registry: InstanceRegistry,
 	private val port: Int = DEFAULT_PORT,
 	private val host: String = LOOPBACK,
+	private val launcher: InstanceLauncher = InstanceLauncher(),
 ) {
 
 	private val client: HttpClient = HttpClient.newBuilder()
@@ -91,6 +92,9 @@ class DashboardServer @JvmOverloads constructor(
 	}
 
 	fun stop() {
+		// Las instancias que arrancara este hub se van con el: si el panel se
+		// cierra dejando bots vivos, no hay forma de pararlos desde la pagina.
+		launcher.stopAll()
 		server?.stop(0)
 		prober.shutdownNow()
 		httpThreads.shutdownNow()
@@ -114,13 +118,20 @@ class DashboardServer @JvmOverloads constructor(
 				path == "api/instances" && method == "POST" -> upsert(exchange)
 				path == "api/discover" && method == "POST" -> discover(exchange)
 
+				path == "api/launch" && method == "POST" -> launch(exchange)
+				path == "api/stop" && method == "POST" -> stop(exchange)
+				path == "api/launcher" && method == "GET" -> send(exchange, 200, json(okBody(launcherState())))
+
 				path == "api/health" && method == "GET" -> send(exchange, 200, json(okBody(Json.obj().apply {
 					addProperty("status", "ok")
 					addProperty("instances", registry.all().size)
 				})))
 
 				path.startsWith("api/broadcast/") -> {
-					val rest = path.removePrefix("api/broadcast/")
+					// Ojo: se quita `api/broadcast` y NO la barra. La cola tiene que
+					// llegar a `forward` con su `/` inicial, si no el destino se
+					// construye como `/puppeteerchat` y la instancia responde 404.
+					val rest = path.removePrefix("api/broadcast")
 					broadcast(exchange, method, rest, exchange.requestURI.rawQuery)
 				}
 
@@ -203,7 +214,7 @@ class DashboardServer @JvmOverloads constructor(
 	 * Es lo que hace falta para "manda esto a todos": un `POST /broadcast/chat`
 	 * va a cada instancia en paralelo y devuelve un resultado por cada una,
 	 * con su estado HTTP o su error. No es todo-o-nada a proposito: si una
-	 * instancia esta apagada, las otras han recibido equally el mensaje y eso
+	 * instancia esta apagada, las otras han recibido igual el mensaje y eso
 	 * hay que poder verlo.
 	 *
 	 * Sin esto, mandar un comando a 6 bots era 6 peticiones del navegador y
@@ -300,7 +311,7 @@ class DashboardServer @JvmOverloads constructor(
 	 *
 	 * Existe para el caso "la he abierto yo desde la terminal, que me salga en
 	 * la pagina": arrancar Minecraft a mano no pasa por el hub, asi que sin esto
-	 * esa instancia seria invisible hasta que alguien laiese a mano.
+	 * esa instancia seria invisible hasta que alguien la diese de alta a mano.
 	 *
 	 * Solo se dan de alta si contestan como Puente de verdad, y se comprueba en
 	 * el registro de la configuracion de juego de cada instancia para traer su
@@ -395,11 +406,18 @@ class DashboardServer @JvmOverloads constructor(
 	 * Se leen los ficheros que el propio mod escribe al arrancar, no se le pide
 	 * el token a nadie: asi el secreto nunca sale hacia el navegador y el hub
 	 * no necesita inventar nada.
+	 *
+	 * La ruta de una instancia lanzada por el hub la da [InstanceLauncher], que
+	 * es quien decidio donde vive su carpeta de juego. Para las sueltas se prueba
+	 * `run-instances/p<port>/config` y tambien el `run/config` de una instancia
+	 * montada a mano; el token se busca en los dos y gana el primero que exista.
 	 */
 	private fun tokenForPort(port: Int): String {
 		val candidates = listOf(
+			// La instancia principal, arrancada a mano.
 			Path.of(workingDir(), "run", "config", "mc-puppeteer.json"),
-			Path.of(workingDir(), "run-instances", "p$port", "config", "mc-puppeteer.json"),
+			// Las que arranca el hub desde el panel.
+			launcher.configFile(port),
 		)
 		return candidates.firstNotNullOfOrNull { file ->
 			runCatching {
@@ -416,6 +434,69 @@ class DashboardServer @JvmOverloads constructor(
 
 	private class Discovered(val port: Int, val name: String, val token: String)
 
+	/**
+	 * Arranca una instancia nueva y la da de alta en el panel.
+	 *
+	 * El token lo genera y siembra [InstanceLauncher] y se registra aqui, asi que
+	 * la pagina recibe el alta con la instancia ya lista para sondear: no hay
+	 * ventana en la que aparezca "apagada" y haya que esperar a que el mod levante.
+	 *
+	 * Solo se acepta `port`, y solo del rango permitido. El proceso, su clase y su
+	 * classpath no se negocian: estan en [InstanceLauncher].
+	 */
+	private fun launch(exchange: HttpExchange) {
+		val body = Json.parse(String(readBody(exchange), StandardCharsets.UTF_8))
+		val port = body.get("port")?.takeIf { !it.isJsonNull }?.asInt
+			?: throw BadRequest("falta 'port'")
+		val name = body.get("name")?.takeIf { !it.isJsonNull }?.asString?.takeIf { it.isNotBlank() }
+			?: "Instancia $port"
+
+		val pid = try {
+			launcher.launch(port)
+		} catch (e: InstanceLauncher.InstanceLaunchException) {
+			send(exchange, 400, json(errorBody("launch_failed", e.message ?: e.javaClass.simpleName)))
+			return
+		}
+
+		val instance = registry.upsert(name, LOOPBACK, port, launcher.tokenForPort(port))
+		send(exchange, 200, json(okBody(Json.obj().apply {
+			add("instance", instance.toJson())
+			addProperty("pid", pid)
+			addProperty("started", true)
+		})))
+	}
+
+	/**
+	 * Para una instancia.
+	 *
+	 * Acepta `port` y no `pid`: el hub solo para lo que el mismo ha arrancado, y
+	 * por puerto se llega a ese proceso sin que el navegador pueda influir en ello.
+	 */
+	private fun stop(exchange: HttpExchange) {
+		val body = Json.parse(String(readBody(exchange), StandardCharsets.UTF_8))
+		val port = body.get("port")?.takeIf { !it.isJsonNull }?.asInt
+			?: throw BadRequest("falta 'port'")
+
+		val stopped = launcher.stop(port)
+		send(exchange, 200, json(okBody(Json.obj().apply {
+			addProperty("stopped", stopped)
+			addProperty("port", port)
+			if (!stopped) addProperty("note", "el hub no habia arrancado esa instancia")
+		})))
+	}
+
+	/** Lo que el frontend necesita para pintar los botones: si se puede y que vive. */
+	private fun launcherState(): JsonObject = Json.obj().apply {
+		addProperty("ready", launcher.ready())
+		addProperty("from", DashboardServer.DEFAULT_SCAN_FROM)
+		addProperty("to", DashboardServer.DEFAULT_SCAN_TO)
+		val running = JsonArray()
+		for (p in DashboardServer.DEFAULT_SCAN_FROM..DashboardServer.DEFAULT_SCAN_TO) {
+			launcher.runningPid(p)?.let { running.add(Json.obj().apply { addProperty("port", p); addProperty("pid", it) }) }
+		}
+		add("running", running)
+	}
+
 	private fun routeProxy(exchange: HttpExchange, method: String, path: String) {
 		val rest = path.removePrefix("api/instances/")
 		val slash = rest.indexOf('/')
@@ -425,7 +506,7 @@ class DashboardServer @JvmOverloads constructor(
 		val instance = registry.find(id)
 			?: throw BadRequest("no existe la instancia '$id'", "unknown_instance")
 
-		// Barrera anti-SSRF: aunque el registro se hubiera manipulated, aqui no
+		// Barrera anti-SSRF: aunque el registro se hubiera manipulado, aqui no
 		// sale nada hacia un host que no sea loopback.
 		if (!instance.isLoopback) {
 			send(exchange, 403, json(errorBody("forbidden_host", "el hub solo hace proxy a loopback")))
@@ -455,7 +536,15 @@ class DashboardServer @JvmOverloads constructor(
 		body: ByteArray,
 		contentType: String?,
 	): Proxied {
-		val suffix = if (tail.isEmpty()) "/status" else tail
+		// `tail` siempre lleva su `/` inicial. Se normaliza aqui porque esta
+		// funcion concatena a pelo: si un dia llega `chat` en vez de `/chat` el
+		// destino sale `/puppeteerchat` y el fallo aparece como un 404 en la
+		// instancia, que no dice nada de que el error fue montar mal la ruta.
+		val suffix = when {
+			tail.isEmpty() -> "/status"
+			tail.startsWith("/") -> tail
+			else -> "/$tail"
+		}
 		val target = URI(
 			"http://${instance.host}:${instance.port}/puppeteer$suffix" +
 				if (query != null) "?$query" else "",

@@ -6,155 +6,365 @@
 <title>Puente · Panel de instancias</title>
 <style>
 :root {
-  --bg: #0e1116;
-  --panel: #161b22;
-  --panel-2: #1c232c;
-  --line: #2a323d;
-  --text: #e6edf3;
-  --muted: #8b949e;
-  --accent: #2f81f7;
-  --ok: #3fb950;
-  --warn: #d29922;
-  --bad: #f85149;
-  --radius: 10px;
+  --bg: #070a10;
+  --panel: rgba(20, 25, 33, .72);
+  --panel-2: rgba(30, 37, 47, .78);
+  --solid-2: #1e252f;
+  --line: rgba(255, 255, 255, .07);
+  --line-2: rgba(255, 255, 255, .13);
+  --text: #e8eef5;
+  --muted: #8b96a5;
+  --accent: #4c8dff;
+  --accent-2: #8b5cf6;
+  --ok: #3fd07f;
+  --warn: #e8a317;
+  --bad: #ff5c52;
+  --radius: 16px;
+  --shadow: 0 18px 40px -18px rgba(0, 0, 0, .85);
+  --st: var(--muted);
 }
 * { box-sizing: border-box; }
+html, body { height: 100%; }
 body {
   margin: 0;
-  background: var(--bg);
   color: var(--text);
   font: 14px/1.5 ui-sans-serif, system-ui, "Segoe UI", Roboto, sans-serif;
+  background:
+    radial-gradient(1100px 620px at 12% -12%, rgba(76, 141, 255, .16), transparent 60%),
+    radial-gradient(900px 520px at 92% -6%, rgba(139, 92, 246, .14), transparent 62%),
+    radial-gradient(700px 500px at 50% 110%, rgba(63, 208, 127, .07), transparent 60%),
+    var(--bg);
+  background-attachment: fixed;
+  -webkit-font-smoothing: antialiased;
 }
+h1, h2, h3 { margin: 0; }
+button, input, select { font-family: inherit; }
+
+/* ---------- cabecera ---------- */
 header {
-  display: flex; align-items: center; gap: 16px;
-  padding: 14px 20px;
+  display: flex; align-items: center; gap: 14px;
+  padding: 14px 24px;
+  background: linear-gradient(180deg, rgba(13, 17, 23, .92), rgba(13, 17, 23, .72));
+  border-bottom: 1px solid var(--line);
+  backdrop-filter: blur(14px);
+  position: sticky; top: 0; z-index: 20;
+}
+.brand { display: flex; align-items: center; gap: 11px; }
+.brand .mark {
+  width: 34px; height: 34px; flex: none;
+  display: grid; place-items: center;
+  border-radius: 11px;
+  background: linear-gradient(140deg, var(--accent), var(--accent-2));
+  box-shadow: 0 6px 18px -6px rgba(76, 141, 255, .8);
+  color: #fff;
+}
+.brand h1 { font-size: 16px; font-weight: 650; letter-spacing: .2px; }
+.brand .sub { color: var(--muted); font-size: 12px; display: block; margin-top: -1px; }
+header .spacer { flex: 1; }
+.clock {
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 12px; color: var(--muted);
+  background: rgba(255, 255, 255, .04);
+  border: 1px solid var(--line);
+  padding: 4px 10px; border-radius: 999px;
+}
+
+/* ---------- barra de acciones globales ---------- */
+.bar {
+  display: flex; flex-wrap: wrap; gap: 20px; align-items: center;
+  padding: 12px 24px;
   background: var(--panel);
   border-bottom: 1px solid var(--line);
-  position: sticky; top: 0; z-index: 10;
+  backdrop-filter: blur(14px);
+  position: sticky; top: 63px; z-index: 15;
 }
-header h1 { font-size: 16px; margin: 0; font-weight: 600; letter-spacing: .2px; }
-header .sub { color: var(--muted); font-size: 12px; }
-header .spacer { flex: 1; }
-main { padding: 20px; max-width: 1500px; margin: 0 auto; }
+.bar-grp { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.bar-lbl {
+  font-size: 10.5px; color: var(--muted); font-weight: 650;
+  text-transform: uppercase; letter-spacing: .1em;
+}
 
-.dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; flex: none; }
-.dot.on { background: var(--ok); box-shadow: 0 0 7px var(--ok); }
-.dot.off { background: var(--bad); }
-
+/* ---------- controles ---------- */
 .btn {
   background: var(--panel-2); color: var(--text);
-  border: 1px solid var(--line); border-radius: 7px;
-  padding: 6px 11px; cursor: pointer; font-size: 13px; font-family: inherit;
-  transition: background .12s, border-color .12s;
+  border: 1px solid var(--line-2); border-radius: 999px;
+  padding: 7px 14px; cursor: pointer; font-size: 12.5px; font-weight: 550;
+  transition: transform .12s, background .15s, border-color .15s, box-shadow .15s;
+  white-space: nowrap;
 }
-.btn:hover:not(:disabled) { background: #263040; border-color: #3d4855; }
-.btn:disabled { opacity: .4; cursor: not-allowed; }
-.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-.btn.primary:hover:not(:disabled) { background: #1f6feb; }
-.btn.danger { border-color: #5a2a2a; color: #ff9a92; }
-.btn.danger:hover:not(:disabled) { background: #3d1d1d; }
+.btn:hover:not(:disabled) {
+  background: #29323e; border-color: #46525f;
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px -8px rgba(0, 0, 0, .9);
+}
+.btn:active:not(:disabled) { transform: translateY(0); }
+.btn:disabled { opacity: .38; cursor: not-allowed; }
+.btn.primary {
+  background: linear-gradient(140deg, var(--accent), #3b6fe0);
+  border-color: transparent; color: #fff;
+  box-shadow: 0 8px 20px -10px rgba(76, 141, 255, .9);
+}
+.btn.primary:hover:not(:disabled) { filter: brightness(1.1); }
+.btn.danger { border-color: rgba(255, 92, 82, .35); color: #ff9a94; }
+.btn.danger:hover:not(:disabled) { background: rgba(255, 92, 82, .14); border-color: rgba(255, 92, 82, .55); }
+.btn.sm { padding: 5px 11px; font-size: 12px; }
 
-.grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fill, minmax(430px, 1fr)); }
+input, select {
+  background: rgba(7, 10, 16, .7); color: var(--text);
+  border: 1px solid var(--line-2); border-radius: 9px;
+  padding: 7px 11px; font-size: 13px; min-width: 0;
+  transition: border-color .15s, box-shadow .15s, background .15s;
+}
+input::placeholder { color: #5d6875; }
+input:focus, select:focus {
+  outline: none; border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(76, 141, 255, .18);
+  background: rgba(7, 10, 16, .9);
+}
+input.n { width: 88px; }
+input.grow { flex: 1; }
+
+/* ---------- resumen ---------- */
+main { padding: 22px 24px 40px; max-width: 1560px; margin: 0 auto; }
+.summary {
+  display: grid; gap: 12px; margin-bottom: 20px;
+  grid-template-columns: repeat(auto-fit, minmax(168px, 1fr));
+}
+.tile {
+  position: relative; overflow: hidden;
+  background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 13px 15px;
+  backdrop-filter: blur(10px);
+}
+.tile::after {
+  content: ""; position: absolute; inset: 0 auto 0 0; width: 3px;
+  background: var(--t, var(--accent));
+  box-shadow: 0 0 16px -2px var(--t, var(--accent));
+}
+.tile .k {
+  font-size: 10.5px; color: var(--muted); font-weight: 650;
+  text-transform: uppercase; letter-spacing: .1em;
+}
+.tile .v { font-size: 26px; font-weight: 620; letter-spacing: -.5px; margin-top: 3px; }
+.tile .v.dim { color: var(--muted); font-weight: 400; }
+
+/* ---------- rejilla y tarjetas ---------- */
+.grid { display: grid; gap: 18px; grid-template-columns: repeat(auto-fill, minmax(440px, 1fr)); }
 
 .card {
-  background: var(--panel); border: 1px solid var(--line);
-  border-radius: var(--radius); overflow: hidden;
+  --st: var(--muted);
+  position: relative;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  overflow: hidden;
+  backdrop-filter: blur(12px);
+  box-shadow: var(--shadow);
+  transition: transform .18s, border-color .18s, box-shadow .18s;
 }
+.card:hover { transform: translateY(-3px); border-color: var(--line-2); }
+.card.st-play { --st: var(--ok); }
+.card.st-menu { --st: var(--warn); }
+.card.st-dead { --st: var(--bad); }
+.card.st-off  { --st: #5d6875; }
+.card::before {
+  content: ""; position: absolute; top: 0; left: 0; right: 0; height: 3px;
+  background: linear-gradient(90deg, var(--st), transparent 85%);
+}
+
 .card > .head {
   display: flex; align-items: center; gap: 10px;
-  padding: 12px 14px; background: var(--panel-2);
+  padding: 14px 15px 12px;
   border-bottom: 1px solid var(--line);
 }
-.card > .head .name { font-weight: 600; }
-.card > .head .port { color: var(--muted); font-size: 12px; font-family: ui-monospace, monospace; }
+.card > .head .name { font-weight: 620; font-size: 14.5px; }
+.card > .head .port {
+  color: var(--muted); font-size: 12px;
+  font-family: ui-monospace, Consolas, monospace;
+  background: rgba(255, 255, 255, .05);
+  border: 1px solid var(--line);
+  padding: 1px 7px; border-radius: 6px;
+}
 .card > .head .spacer { flex: 1; }
 
-.body { padding: 14px; display: flex; flex-direction: column; gap: 14px; }
+.dot {
+  width: 9px; height: 9px; border-radius: 50%;
+  display: inline-block; flex: none;
+  background: var(--st, var(--muted));
+}
+.dot.on { box-shadow: 0 0 0 0 var(--st); animation: pulse 2.1s infinite; }
+@keyframes pulse {
+  0%   { box-shadow: 0 0 0 0 rgba(63, 208, 127, .5); }
+  70%  { box-shadow: 0 0 0 8px rgba(63, 208, 127, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(63, 208, 127, 0); }
+}
+
+.pill {
+  font-size: 10.5px; font-weight: 650; letter-spacing: .06em; text-transform: uppercase;
+  padding: 3px 10px; border-radius: 999px;
+  border: 1px solid var(--st, var(--line-2));
+  color: var(--st, var(--muted));
+  background: color-mix(in srgb, var(--st, #555) 12%, transparent);
+  white-space: nowrap;
+}
+
+.body { padding: 14px 15px 15px; display: flex; flex-direction: column; gap: 14px; }
 
 .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 9px; }
-.stat { background: var(--panel-2); border: 1px solid var(--line); border-radius: 7px; padding: 7px 9px; }
-.stat .k { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .4px; }
-.stat .v { font-size: 13px; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.stat .v.empty { color: var(--muted); font-style: italic; }
-
-.pill { font-size: 11px; padding: 2px 8px; border-radius: 20px; border: 1px solid; white-space: nowrap; }
-.pill.ok { color: var(--ok); border-color: #1d572a; background: #0f2c16; }
-.pill.warn { color: var(--warn); border-color: #5c4a12; background: #2b2210; }
-.pill.bad { color: var(--bad); border-color: #5c2222; background: #2d1414; }
+.stat {
+  background: rgba(255, 255, 255, .035);
+  border: 1px solid var(--line);
+  border-radius: 11px; padding: 8px 10px; min-width: 0;
+}
+.stat .k {
+  color: var(--muted); font-size: 10px; font-weight: 650;
+  text-transform: uppercase; letter-spacing: .09em;
+}
+.stat .v {
+  font-size: 13.5px; margin-top: 2px; font-weight: 550;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.stat .v.empty { color: var(--muted); font-weight: 400; font-style: italic; }
+.meter { height: 3px; border-radius: 2px; background: rgba(255, 255, 255, .09); margin-top: 6px; overflow: hidden; }
+.meter i { display: block; height: 100%; border-radius: 2px; background: var(--m, var(--ok)); transition: width .4s; }
 
 .sect { border-top: 1px solid var(--line); padding-top: 12px; }
 .sect > h3 {
-  margin: 0 0 9px; font-size: 11px; text-transform: uppercase;
-  letter-spacing: .6px; color: var(--muted); font-weight: 600;
+  margin: 0 0 9px; font-size: 10.5px; text-transform: uppercase;
+  letter-spacing: .1em; color: var(--muted); font-weight: 650;
+  display: flex; align-items: center; gap: 6px;
 }
+.sect > h3 svg { width: 13px; height: 13px; opacity: .75; }
 .row { display: flex; gap: 7px; flex-wrap: wrap; align-items: center; }
 .row + .row { margin-top: 7px; }
-input, select {
-  background: #0d1117; color: var(--text); border: 1px solid var(--line);
-  border-radius: 6px; padding: 6px 9px; font-size: 13px; font-family: inherit; min-width: 0;
-}
-input:focus, select:focus { outline: none; border-color: var(--accent); }
-input.n { width: 74px; }
-input.grow { flex: 1; }
 
-/* Rejilla de inventario: 9 columnas para la barra rapida, tal y como se ve en el juego. */
+/* ---------- inventario ---------- */
 .inv { display: grid; grid-template-columns: repeat(9, 1fr); gap: 4px; }
 .slot {
-  aspect-ratio: 1; background: #0d1117; border: 1px solid var(--line);
-  border-radius: 5px; display: flex; align-items: center; justify-content: center;
-  font-size: 10px; text-align: center; padding: 2px; position: relative;
-  overflow: hidden; color: var(--muted); line-height: 1.1;
+  aspect-ratio: 1; border-radius: 8px;
+  background: rgba(7, 10, 16, .62);
+  border: 1px solid var(--line);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 9.5px; text-align: center; padding: 2px;
+  position: relative; overflow: hidden;
+  color: #56606d; line-height: 1.1;
 }
-.slot.filled { color: var(--text); border-color: #3d4855; }
-.slot .n { position: absolute; right: 2px; bottom: 1px; font-size: 9px; color: var(--warn); }
-.slot.sel { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
-.armor { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; margin-top: 8px; }
+.slot.filled {
+  color: var(--text);
+  border-color: var(--line-2);
+  background: linear-gradient(160deg, rgba(76, 141, 255, .16), rgba(139, 92, 246, .1));
+}
+.slot .n { position: absolute; right: 3px; bottom: 2px; font-size: 9px; color: var(--warn); }
+.slot.sel { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(76, 141, 255, .35); }
+.armor { display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px; margin-top: 8px; }
 
+/* ---------- registro ---------- */
 .log {
-  max-height: 170px; overflow-y: auto; background: #0d1117;
-  border: 1px solid var(--line); border-radius: 7px; padding: 8px;
+  max-height: 180px; overflow-y: auto;
+  background: rgba(7, 10, 16, .62);
+  border: 1px solid var(--line); border-radius: 11px; padding: 9px 11px;
   font-family: ui-monospace, Consolas, monospace; font-size: 11.5px;
 }
-.log div { padding: 1px 0; border-bottom: 1px solid #151b23; }
+.log div { padding: 1.5px 0; border-bottom: 1px solid rgba(255, 255, 255, .04); }
+.log div:last-child { border-bottom: 0; }
 .log .t { color: var(--muted); }
 .log .sys { color: var(--accent); }
 .log .err { color: var(--bad); }
 .log .ok { color: var(--ok); }
 
 .hidden { display: none !important; }
-.empty-note { color: var(--muted); font-style: italic; font-size: 12px; }
-.hint { color: var(--muted); font-size: 11px; margin-top: 5px; }
+.empty-note { color: var(--muted); font-style: italic; font-size: 12.5px; }
+.hint { color: var(--muted); font-size: 11px; margin-top: 6px; }
 
-/* Dialogo de alta */
-dialog {
-  background: var(--panel); color: var(--text); border: 1px solid var(--line);
-  border-radius: var(--radius); padding: 0; width: 380px;
+/* ---------- avisos ---------- */
+.toasts {
+  position: fixed; right: 18px; bottom: 18px; z-index: 60;
+  display: flex; flex-direction: column; gap: 8px; align-items: flex-end;
+  pointer-events: none;
 }
-dialog::backdrop { background: rgba(0,0,0,.6); }
-dialog .dlg-body { padding: 18px; display: flex; flex-direction: column; gap: 11px; }
-dialog h2 { margin: 0 0 3px; font-size: 15px; }
-label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
+.toast {
+  background: rgba(20, 25, 33, .95);
+  border: 1px solid var(--line-2);
+  border-left: 3px solid var(--accent);
+  border-radius: 10px; padding: 9px 14px;
+  font-size: 12.5px; max-width: 380px;
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(12px);
+  animation: toastIn .22s ease-out;
+}
+.toast.ok { border-left-color: var(--ok); }
+.toast.err { border-left-color: var(--bad); }
+.toast.out { animation: toastOut .3s forwards; }
+@keyframes toastIn { from { opacity: 0; transform: translateX(24px); } }
+@keyframes toastOut { to { opacity: 0; transform: translateX(24px); } }
+
+/* ---------- dialogo ---------- */
+dialog {
+  background: rgba(20, 25, 33, .97); color: var(--text);
+  border: 1px solid var(--line-2); border-radius: var(--radius);
+  padding: 0; width: 390px; box-shadow: var(--shadow);
+  backdrop-filter: blur(16px);
+}
+dialog::backdrop { background: rgba(4, 6, 10, .68); backdrop-filter: blur(3px); }
+dialog .dlg-body { padding: 20px; display: flex; flex-direction: column; gap: 12px; }
+dialog h2 { font-size: 15.5px; }
+label { display: flex; flex-direction: column; gap: 5px; font-size: 11.5px; color: var(--muted); font-weight: 600; }
 label input { color: var(--text); }
+
+@media (max-width: 720px) {
+  header, .bar { padding-left: 14px; padding-right: 14px; }
+  .bar { top: 59px; gap: 12px; }
+  .bar input { width: 100%; }
+  .grid { grid-template-columns: 1fr; }
+}
 </style>
 </head>
 <body>
 
 <header>
+  <div class="brand">
+    <span class="mark" aria-hidden="true">
+      <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round">
+        <path d="M2 16c5 0 5-8 10-8s5 8 10 8"/><path d="M4 20h16"/><path d="M12 8v12"/>
+      </svg>
+    </span>
+    <span>
+      <h1>Puente</h1>
+      <span class="sub" id="hubInfo">conectando…</span>
+    </span>
+  </div>
   <span class="dot on" id="hubDot"></span>
-  <h1>Puente</h1>
-  <span class="sub" id="hubInfo">conectando…</span>
   <span class="spacer"></span>
-  <span class="sub" id="tick"></span>
+  <span class="clock" id="tick"></span>
   <button class="btn" id="btnRefresh">Refrescar</button>
-  <button class="btn primary" id="btnAdd">+ Instancia</button>
+  <button class="btn" id="btnDiscover">Descubrir</button>
+  <button class="btn" id="btnAdd">Registrar</button>
+  <button class="btn primary" id="btnLaunch">+ Instancia</button>
 </header>
 
+<div class="bar">
+  <div class="bar-grp">
+    <span class="bar-lbl">Acciones a todas</span>
+    <input id="bcPath" value="chat" placeholder="chat, command, baritone/mine…">
+    <input id="bcBody" class="n" placeholder='{"message":"hola"}'>
+    <button class="btn" data-all="run">Enviar a todas</button>
+  </div>
+  <div class="bar-grp">
+    <span class="bar-lbl" id="launchInfo">…</span>
+    <input id="newPort" class="n" type="number" placeholder="puerto" min="25580" max="25599">
+    <button class="btn primary" data-all="launch">Arrancar</button>
+  </div>
+</div>
+
 <main>
+  <div class="summary" id="summary"></div>
   <div class="grid" id="grid"></div>
   <p class="empty-note" id="noInstances" style="display:none">
     No hay instancias. Pulsa «+ Instancia» para añadir una.
   </p>
 </main>
+
+<div class="toasts" id="toasts"></div>
 
 <dialog id="dlg">
   <div class="dlg-body">
@@ -196,6 +406,17 @@ async function api(path, options = {}) {
 
 const el = (id) => document.getElementById(id);
 
+/** Aviso flotante: el resultado de una accion, sin tener que leer el log. */
+function toast(text, kind = "") {
+  const box = el("toasts");
+  const d = document.createElement("div");
+  d.className = "toast " + kind;
+  d.textContent = text;
+  box.appendChild(d);
+  setTimeout(() => d.classList.add("out"), 3400);
+  setTimeout(() => d.remove(), 3800);
+}
+
 // --- Estado ----------------------------------------------------------------
 
 const state = {
@@ -226,12 +447,16 @@ async function act(id, path, body, label) {
     });
     if (res.status >= 200 && res.status < 300) {
       log(id, `✓ ${label}`, "ok");
+      toast(`${label} — ok`, "ok");
     } else {
       const e = res.body && res.body.error;
-      log(id, `✗ ${label}: ${e ? e.code + " — " + e.message : "HTTP " + res.status}`, "err");
+      const msg = e ? e.code + " — " + e.message : "HTTP " + res.status;
+      log(id, `✗ ${label}: ${msg}`, "err");
+      toast(`${label} — ${msg}`, "err");
     }
   } catch (err) {
     log(id, `✗ ${label}: ${err.message}`, "err");
+    toast(`${label} — ${err.message}`, "err");
   } finally {
     state.busy[id] = false;
     refresh();
@@ -240,18 +465,42 @@ async function act(id, path, body, label) {
 
 // --- Render ----------------------------------------------------------------
 
-function statusPill(inst) {
-  if (!inst.online) return `<span class="pill bad">apagada</span>`;
+/** Estado de la tarjeta, que tambien fija el color de acento. */
+function cardState(inst) {
+  if (!inst.online) return "off";
   const s = inst.status || {};
-  if (!s.inWorld) return `<span class="pill warn">en menú</span>`;
-  if (s.dead) return `<span class="pill bad">muerta</span>`;
-  return `<span class="pill ok">en juego</span>`;
+  if (s.dead) return "dead";
+  return s.inWorld ? "play" : "menu";
+}
+
+function statusPill(inst) {
+  const st = cardState(inst);
+  const label = { off: "apagada", menu: "en menú", dead: "muerta", play: "en juego" }[st];
+  return `<span class="pill">${label}</span>`;
 }
 
 function stat(k, v) {
   const empty = v === null || v === undefined || v === "";
   return `<div class="stat"><div class="k">${esc(k)}</div>
     <div class="v${empty ? " empty" : ""}">${empty ? "—" : esc(v)}</div></div>`;
+}
+
+/** El FPS lleva una barrita: un numero suelto no dice si va bien o mal. */
+function fpsStat(v) {
+  if (typeof v !== "number" || v <= 0) return stat("FPS", null);
+  const tone = v >= 50 ? "var(--ok)" : v >= 25 ? "var(--warn)" : "var(--bad)";
+  return `<div class="stat"><div class="k">FPS</div>
+    <div class="v">${v}</div>
+    <div class="meter"><i style="width:${Math.min(100, Math.round(v / 6))}%;--m:${tone}"></i></div>
+  </div>`;
+}
+
+function tile(k, v, tone) {
+  const empty = v === null || v === undefined;
+  return `<div class="tile"${tone ? ` style="--t:${tone}"` : ""}>
+    <div class="k">${esc(k)}</div>
+    <div class="v${empty ? " dim" : ""}">${empty ? "—" : esc(v)}</div>
+  </div>`;
 }
 
 function slotHtml(slot, selected) {
@@ -292,6 +541,10 @@ function chatHtml(id) {
   ).join("");
 }
 
+const ICON_CHAT = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>`;
+const ICON_BOT = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="4" y="8" width="16" height="12" rx="3"/><path d="M12 8V4"/><circle cx="12" cy="3" r="1.4"/><path d="M9 14h.01M15 14h.01"/></svg>`;
+const ICON_BAG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 8h12l-1 13H7z"/><path d="M9 8V6a3 3 0 0 1 6 0v2"/></svg>`;
+
 function cardHtml(inst) {
   const s = inst.status || {};
   const open = !!state.expanded[inst.id];
@@ -299,14 +552,14 @@ function cardHtml(inst) {
   const busy = !!state.busy[inst.id];
   const dis = busy ? "disabled" : "";
 
-  return `<div class="card" data-id="${esc(inst.id)}">
+  return `<div class="card st-${cardState(inst)}" data-id="${esc(inst.id)}">
     <div class="head">
       <span class="dot ${inst.online ? "on" : "off"}"></span>
       <span class="name">${esc(inst.name)}</span>
       <span class="port">:${inst.port}</span>
       <span class="spacer"></span>
       ${statusPill(inst)}
-      <button class="btn" data-act="toggle" data-id="${esc(inst.id)}">${open ? "Ocultar" : "Detalle"}</button>
+      <button class="btn sm" data-act="toggle" data-id="${esc(inst.id)}">${open ? "Ocultar" : "Detalle"}</button>
     </div>
 
     <div class="body">
@@ -314,7 +567,7 @@ function cardHtml(inst) {
         ${stat("Jugador", s.playerName)}
         ${stat("Mundo", s.worldName || s.serverName)}
         ${stat("Dimensión", s.dimension)}
-        ${stat("FPS", s.fps)}
+        ${fpsStat(s.fps)}
         ${stat("Jugadores", s.playerCount ? `${s.playerCount}${s.maxPlayers ? " / " + s.maxPlayers : ""}` : null)}
         ${stat("Pantalla", s.screen)}
       </div>
@@ -328,10 +581,12 @@ function cardHtml(inst) {
           title="${s.dead ? "" : "solo si el personaje está muerto"}">Reaparecer</button>
         <button class="btn" data-act="status" data-id="${esc(inst.id)}" ${dis}>Actualizar</button>
         <button class="btn" data-act="profile" data-id="${esc(inst.id)}" ${dis}>Identidad</button>
+        <button class="btn danger" data-act="stop" data-id="${esc(inst.id)}" ${dis}
+          title="el panel solo para instancias que ha arrancado él">Parar</button>
       </div>
 
       <div class="sect">
-        <h3>Chat y comandos</h3>
+        <h3>${ICON_CHAT} Chat y comandos</h3>
         <div class="row">
           <input class="grow" data-input="chat" data-id="${esc(inst.id)}" placeholder="Mensaje para el chat">
           <button class="btn" data-act="chat" data-id="${esc(inst.id)}" ${dis}>Enviar</button>
@@ -343,7 +598,7 @@ function cardHtml(inst) {
       </div>
 
       <div class="sect">
-        <h3>Baritone</h3>
+        <h3>${ICON_BOT} Baritone</h3>
         <div class="row">
           <input data-input="block" data-id="${esc(inst.id)}" placeholder="diamond_ore" value="diamond_ore">
           <input data-input="amount" data-id="${esc(inst.id)}" class="n" type="number" value="32" min="1">
@@ -359,8 +614,8 @@ function cardHtml(inst) {
 
       <div class="sect">
         <div class="row" style="justify-content:space-between">
-          <h3 style="margin:0">Inventario</h3>
-          <button class="btn" data-act="inv" data-id="${esc(inst.id)}" ${dis}>
+          <h3 style="margin:0">${ICON_BAG} Inventario</h3>
+          <button class="btn sm" data-act="inv" data-id="${esc(inst.id)}" ${dis}>
             ${invOpen ? "Ocultar" : "Ver"}</button>
         </div>
         <div style="margin-top:9px" class="${invOpen ? "" : "hidden"}" data-inv="${esc(inst.id)}">
@@ -383,8 +638,20 @@ function cardHtml(inst) {
 function render() {
   el("grid").innerHTML = state.instances.map(cardHtml).join("");
   el("noInstances").style.display = state.instances.length ? "none" : "block";
+
+  const on = state.instances.filter(i => i.online);
+  const playing = on.filter(i => i.status && i.status.inWorld);
+  const fps = on.map(i => i.status && i.status.fps).filter(n => typeof n === "number" && n > 0);
+  const avg = fps.length ? Math.round(fps.reduce((a, b) => a + b, 0) / fps.length) : null;
+  el("summary").innerHTML =
+    tile("Instancias", state.instances.length, "var(--accent)") +
+    tile("En línea", on.length, "var(--ok)") +
+    tile("En juego", playing.length, "var(--accent-2)") +
+    tile("FPS medio", avg,
+      avg === null ? null : avg >= 50 ? "var(--ok)" : avg >= 25 ? "var(--warn)" : "var(--bad)");
+
   el("hubInfo").textContent =
-    `${state.instances.length} instancia(s) · ${state.instances.filter(i => i.online).length} en línea`;
+    `${state.instances.length} instancia(s) · ${on.length} en línea`;
 }
 
 // --- Datos -----------------------------------------------------------------
@@ -434,6 +701,9 @@ async function poll() {
 
   render();
   el("tick").textContent = new Date().toLocaleTimeString("es-ES");
+  // El launcher va aparte porque no depende del registro: dice si el proyecto
+  // esta compilado y que instancias ha arrancado este hub.
+  await refreshLauncher();
 }
 
 // --- Eventos ---------------------------------------------------------------
@@ -457,6 +727,7 @@ const ACTIONS = {
   binfo: (id) => baritoneInfo(id),
   follow: (id) => withInput(id, "follow", v => act(id, "baritone/follow", { target: v }, `seguir a ${v}`)),
   remove: (id) => removeInstance(id),
+  stop: (id) => stopInstance(id),
 };
 
 function readInput(id, name) {
@@ -470,7 +741,6 @@ function withInput(id, name, fn) {
 }
 
 function promptConnect(id) {
-  const inst = state.instances.find(i => i.id === id);
   const host = window.prompt("Servidor al que conectar", "localhost");
   if (!host) return;
   const portInput = window.prompt("Puerto", "25565");
@@ -478,6 +748,7 @@ function promptConnect(id) {
   const port = parseInt(portInput, 10);
   if (!Number.isInteger(port) || port < 1 || port > 65535) {
     log(id, "✗ puerto inválido", "err");
+    toast("puerto inválido", "err");
     render();
     return;
   }
@@ -505,7 +776,139 @@ async function removeInstance(id) {
   const inst = state.instances.find(i => i.id === id);
   if (!window.confirm(`¿Quitar «${inst.name}» del panel? (no cierra Minecraft)`)) return;
   await api(`/api/instances/${id}`, { method: "DELETE" });
+  toast(`${inst.name} quitada del panel`);
   poll();
+}
+
+/** El hub solo para lo que el mismo ha arrancado, asi que se manda el puerto. */
+async function stopInstance(id) {
+  const inst = state.instances.find(i => i.id === id);
+  if (!window.confirm(`¿Parar «${inst.name}»?`)) return;
+  state.busy[id] = true;
+  render();
+  const res = await api("/api/stop", {
+    method: "POST",
+    body: JSON.stringify({ port: inst.port }),
+  });
+  const d = res.body && res.body.data;
+  if (res.status === 200 && d && d.stopped) {
+    log(id, "✓ instancia parada");
+    toast(`${inst.name} parada`, "ok");
+  } else if (res.status === 200) {
+    log(id, "· no estaba arrancada por el panel", "err");
+    toast("no estaba arrancada por el panel", "err");
+  } else {
+    const e = res.body && res.body.error;
+    log(id, `✗ parar: ${e ? e.message : "HTTP " + res.status}`, "err");
+    toast(`parar: ${e ? e.message : "HTTP " + res.status}`, "err");
+  }
+  state.busy[id] = false;
+  poll();
+}
+
+/** Lanza una instancia nueva en el puerto escrito en la barra. */
+async function launchInstance() {
+  const raw = el("newPort").value.trim();
+  if (!raw) return;
+  const port = parseInt(raw, 10);
+
+  el("btnLaunch").disabled = true;
+  el("launchInfo").textContent = `arrancando ${port}…`;
+  const res = await api("/api/launch", {
+    method: "POST",
+    body: JSON.stringify({ port, name: `Instancia ${port}` }),
+  });
+
+  if (res.status === 200 && res.body.data && res.body.data.started) {
+    el("launchInfo").textContent = `✓ ${port} arrancada (pid ${res.body.data.pid})`;
+    el("newPort").value = "";
+    toast(`instancia ${port} arrancada (pid ${res.body.data.pid})`, "ok");
+  } else {
+    const e = res.body && res.body.error;
+    el("launchInfo").textContent = `✗ ${e ? e.message : "HTTP " + res.status}`;
+    toast(e ? e.message : "HTTP " + res.status, "err");
+  }
+  el("btnLaunch").disabled = false;
+  poll();
+}
+
+/** Registra las instancias que ya estaban vivas y no venian del panel. */
+async function discoverInstances() {
+  el("btnDiscover").disabled = true;
+  el("btnDiscover").textContent = "Buscando…";
+  const res = await api("/api/discover", { method: "POST" });
+  const d = res.body && res.body.data;
+  if (res.status === 200 && d) {
+    el("hubInfo").textContent = d.added.length
+      ? `${d.added.length} nueva(s) de ${d.scanned} puertos`
+      : `nada nuevo en ${d.scanned} puertos`;
+    toast(d.added.length
+      ? `${d.added.length} instancia(s) nueva(s) de ${d.scanned} puertos`
+      : `nada nuevo en ${d.scanned} puertos`, d.added.length ? "ok" : "");
+  } else {
+    el("hubInfo").textContent = "✗ no se pudo descubrir";
+    toast("no se pudo descubrir", "err");
+  }
+  el("btnDiscover").disabled = false;
+  el("btnDiscover").textContent = "Descubrir";
+  poll();
+}
+
+/** Manda la misma peticion a todas las instancias y resume el resultado. */
+async function broadcastAll() {
+  const path = el("bcPath").value.trim().replace(/^\/+/, "");
+  if (!path) return;
+  const rawBody = el("bcBody").value.trim();
+
+  let body;
+  if (rawBody) {
+    try {
+      body = JSON.parse(rawBody);
+    } catch {
+      window.alert("El cuerpo no es JSON válido.");
+      return;
+    }
+  } else {
+    body = {};
+  }
+
+  el("hubInfo").textContent = "enviando a todas…";
+  const res = await api(`/api/broadcast/${path}`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+
+  const d = res.body && res.body.data;
+  if (res.status === 200 && d) {
+    const fallos = d.results.filter(r => !r.ok);
+    const resumen = `${d.sent}/${d.total} ok` +
+      (fallos.length ? ` · fallaron: ${fallos.map(f => `${f.id}(${f.error || f.status})`).join(", ")}` : "");
+    el("hubInfo").textContent = resumen;
+    toast(resumen, fallos.length ? "err" : "ok");
+  } else {
+    const e = res.body && res.body.error;
+    el("hubInfo").textContent = `✗ ${e ? e.message : "HTTP " + res.status}`;
+    toast(e ? e.message : "HTTP " + res.status, "err");
+  }
+  poll();
+}
+
+/** Pinta el estado del launcher (si se puede arrancar, y que vive ahora). */
+async function refreshLauncher() {
+  const res = await api("/api/launcher");
+  const d = res.body && res.body.data;
+  if (res.status !== 200 || !d) return;
+  const info = el("launchInfo");
+  el("btnLaunch").disabled = !d.ready;
+  if (!d.ready) {
+    info.textContent = "sin compilar: ejecuta ./gradlew build";
+  } else if (!info.textContent.startsWith("✓") && !info.textContent.startsWith("✗")) {
+    info.textContent = `arrancar en ${d.from}–${d.to}` +
+      (d.running.length ? ` · ${d.running.length} viva(s)` : "");
+  }
+  el("newPort").min = d.from;
+  el("newPort").max = d.to;
+  el("newPort").placeholder = `libre (${d.from}–${d.to})`;
 }
 
 document.addEventListener("click", (ev) => {
@@ -525,7 +928,17 @@ document.addEventListener("keydown", (ev) => {
 });
 
 el("btnRefresh").addEventListener("click", poll);
+el("btnDiscover").addEventListener("click", discoverInstances);
+el("btnLaunch").addEventListener("click", launchInstance);
 el("btnAdd").addEventListener("click", () => el("dlg").showModal());
+document.addEventListener("click", (ev) => {
+  const all = ev.target.closest("[data-all]");
+  if (!all) return;
+  if (all.dataset.all === "run") broadcastAll();
+  else if (all.dataset.all === "launch") launchInstance();
+});
+el("bcBody").addEventListener("keydown", (ev) => { if (ev.key === "Enter") broadcastAll(); });
+el("bcPath").addEventListener("keydown", (ev) => { if (ev.key === "Enter") broadcastAll(); });
 el("dlgCancel").addEventListener("click", () => el("dlg").close());
 el("dlgSave").addEventListener("click", async () => {
   const res = await api("/api/instances", {
@@ -539,6 +952,7 @@ el("dlgSave").addEventListener("click", async () => {
   });
   if (res.status === 200) {
     el("dlg").close();
+    toast("instancia registrada", "ok");
     poll();
   } else {
     const e = res.body && res.body.error;

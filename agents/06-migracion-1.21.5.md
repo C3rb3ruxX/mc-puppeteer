@@ -225,7 +225,7 @@ funciona en Java 21, que es el runtime de 1.21.5.
    Loader 0.19.5, Fabric API 0.128.2+1.21.5 y FLK. Confirma que el mod carga, que
    las mappings son las correctas y que el nucleo HTTP levanta dentro del
    cliente (`mc-puppeteer escuchando en http://127.0.0.1:25580`).
-4. **Prueba de humo** (`03-testing.md`): 156 aserciones, todas en verde.
+4. **Prueba de humo** (`03-testing.md`): 195 aserciones, todas en verde.
 
 ## 6. Lo que sigue sin verificar
 
