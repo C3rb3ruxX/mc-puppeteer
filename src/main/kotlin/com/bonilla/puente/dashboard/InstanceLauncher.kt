@@ -7,7 +7,6 @@ import java.io.File
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
-import java.security.SecureRandom
 import java.util.concurrent.ConcurrentHashMap
 
 /**
@@ -103,12 +102,17 @@ class InstanceLauncher @JvmOverloads constructor(
 	 * Deja la configuracion del mod lista para arrancar en [port].
 	 *
 	 * Se escribe **antes** de lanzar porque el puerto se lee al arrancar: si no,
-	 * todas las instancias saldrian en 25580 y solo una podria escuchar. El token
-	 * se genera aqui y se devuelve para que el hub lo registre, con lo que la
-	 * pagina no lo conoce nunca y el fichero de configuracion queda como unico
-	 * sitio donde vive el secreto.
+	 * todas las instancias saldrian en 25580 y solo una podria escuchar.
+	 *
+	 * Aqui no hay token. Se deja `requireToken` en false y se borra el
+	 * `authToken` que hubiera, para que una instancia que antes si lo exigiera
+	 * tampoco lo pida tras volver a arrancarse: el panel y las instancias que
+	 * lanza el forman el mismo equipo y viven en loopback, asi que el puerto ya
+	 * no va a ser una credencial que haya que repartir. Si alguna vez se expone
+	 * algo de Puente a la red, lo que se enciende es el `requireToken` que
+	 * sigue teniendo el mod, no este panel.
 	 */
-	fun seedConfig(port: Int): String {
+	fun seedConfig(port: Int) {
 		val file = configFile(port)
 		Files.createDirectories(file.parent)
 
@@ -121,46 +125,11 @@ class InstanceLauncher @JvmOverloads constructor(
 		json.addProperty("enabled", true)
 		json.addProperty("host", "127.0.0.1")
 		json.addProperty("port", port)
-		// Se exige token siempre: son instancias que el navegador puede mandar a
-		// cualquier parte, y el puerto por si solo no es una credencial.
-		json.addProperty("requireToken", true)
-
-		var token = json.get("authToken")?.takeIf { !it.isJsonNull }?.asString.orEmpty()
-		if (token.isBlank()) {
-			token = newToken()
-			json.addProperty("authToken", token)
-		}
+		json.addProperty("requireToken", false)
+		json.addProperty("authToken", "")
 
 		Files.writeString(file, GSON.toJson(json))
-		return token
 	}
-
-	/**
-	 * Token nuevo: 32 bytes de [SecureRandom] en base64url.
-	 *
-	 * Se usa base64url y no hexadecimal para que no traer ni `+` ni `/`, que en
-	 * una cabecera `Authorization` o en un fichero JSON dan mas problemas de los
-	 * que aportan.
-	 */
-	private fun newToken(): String {
-		val bytes = ByteArray(32)
-		SecureRandom().nextBytes(bytes)
-		return java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(bytes)
-	}
-
-	/**
-	 * Token que hay sembrado en la configuracion de [port], o cadena vacia.
-	 *
-	 * Es la forma de que el hub se entere del token sin que se lo mande el
-	 * navegador ni lo lea de una peticion: se lee del fichero que escribio
-	 * [seedConfig], que es el unico sitio donde vive.
-	 */
-	fun tokenForPort(port: Int): String = runCatching {
-		val file = configFile(port)
-		if (!Files.isRegularFile(file)) return@runCatching ""
-		JsonParser.parseString(Files.readString(file)).asJsonObject
-			.get("authToken")?.takeIf { !it.isJsonNull }?.asString.orEmpty()
-	}.getOrDefault("")
 
 	/**
 	 * Copia los mods sueltos de la instancia principal a la nueva.

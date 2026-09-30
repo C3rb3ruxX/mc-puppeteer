@@ -25,16 +25,14 @@ internal val LOOPBACK_HOSTS = listOf("127.0.0.1", "::1", "localhost")
  * Una instancia de Minecraft, identificada por el puerto donde escucha su
  * puente HTTP.
  *
- * @param token se reenvia como `Authorization: Bearer` en cada peticion. Solo
- *   hace falta si la instancia tiene `requireToken=true`; vacio significa que
- *   no se manda cabecera (que es el caso por defecto).
+ * No hay token. El hub y las instancias que lanza viven los dos en loopback, asi
+ * que el puerto hace de identificador y el panel no pide ni guarda credenciales.
  */
 data class Instance(
 	val id: String,
 	val name: String,
 	val host: String = LOOPBACK,
 	val port: Int,
-	val token: String = "",
 ) {
 	/** El hub solo habla con loopback; ver [InstanceRegistry.validate]. */
 	val isLoopback: Boolean get() = host in LOOPBACK_HOSTS
@@ -44,9 +42,6 @@ data class Instance(
 		addProperty("name", name)
 		addProperty("host", host)
 		addProperty("port", port)
-		// El token nunca sale hacia el navegador: la pagina no lo necesita y
-		// publicarlo en un DOM sería una filtracion gratis.
-		addProperty("hasToken", token.isNotEmpty())
 	}
 }
 
@@ -109,7 +104,7 @@ class InstanceRegistry(registryFile: Path) {
 	fun find(id: String): Instance? = instances.firstOrNull { it.id == id }
 
 	/** Anade o reemplaza por id. Devuelve la instancia resultante. */
-	fun upsert(name: String, host: String, port: Int, token: String): Instance {
+	fun upsert(name: String, host: String, port: Int): Instance {
 		val problems = validate(name, host, port)
 		if (problems.isNotEmpty()) {
 			throw BadRequest(problems.joinToString("; "), "invalid_instance")
@@ -120,7 +115,6 @@ class InstanceRegistry(registryFile: Path) {
 			name = name.trim(),
 			host = host.trim(),
 			port = port,
-			token = token.trim(),
 		)
 
 		synchronized(lock) {
@@ -137,13 +131,6 @@ class InstanceRegistry(registryFile: Path) {
 		if (instances.size != before) save(instances)
 		instances.size != before
 	}
-
-	/**
-	 * Un token ya existente se conserva si la pagina no manda otro, para que
-	 * recargar no borre la credencial.
-	 */
-	fun withExistingToken(port: Int, token: String): String =
-		if (token.isNotBlank()) token else instances.firstOrNull { it.port == port }?.token.orEmpty()
 
 	/**
 	 * Un hub que reenvia peticiones no debe poder usarse para alcanzar la red
@@ -164,20 +151,17 @@ class InstanceRegistry(registryFile: Path) {
 		name = o.get("name")?.asString ?: error("falta 'name'"),
 		host = o.get("host")?.asString ?: LOOPBACK,
 		port = o.get("port")?.asInt ?: error("falta 'port'"),
-		token = o.get("token")?.asString.orEmpty(),
 	)
 
 	private fun save(list: List<Instance>) {
 		Files.createDirectories(file.parent)
 		val root = JsonObject().apply {
-			add("instances", JsonArray().also { array -> list.forEach { array.add(it.toJsonWithToken()) } })
+			add("instances", JsonArray().also { array -> list.forEach { array.add(it.toJson()) } })
 		}
 		val tmp = file.resolveSibling("${file.fileName}.tmp")
 		Files.writeString(tmp, gson.toJson(root))
 		Files.move(tmp, file, StandardCopyOption.REPLACE_EXISTING)
 	}
-
-	private fun Instance.toJsonWithToken(): JsonObject = toJson().apply { addProperty("token", token) }
 }
 
 /** Error de entrada con el codigo que devuelve el hub. */

@@ -58,20 +58,19 @@ es: una superficie de control. Lo que lo hace aceptable en local:
 2. **Se valida la cabecera `Host`.** Es lo que frena el *DNS rebinding*: un sitio
    atacante puede hacer que su dominio resuelva a `127.0.0.1`, y su `fetch`
    llevaria `Host: evil.com`. Sin esta comprobacion, ese sitio podria controlar
-   el panel entero, porque no hay token que le pidiera. Solo se acepta que
-   `Host` sea loopback, con el puerto realmente enlazado.
+    el panel entero, porque no hay token que le pidiera. Solo se acepta que
+    `Host` sea loopback, con el puerto realmente enlazado.
 3. **Anti-SSRF: solo se hace proxy a loopback.** No se puede usar el hub para
    alcanzar la red interna. Se comprueba en dos sitios: al dar de alta la
    instancia y otra vez justo antes de reenviar, por si el registro se hubiera
    manipulado.
-4. **El token se guarda, no se reparte.** `GET /api/instances` devuelve
-   `hasToken: true/false` pero nunca el token. Lo inyecta el hub al reenviar, y
-   la cabecera `Authorization` que llegue del navegador se ignora.
-5. **Ninguna cabecera `Access-Control-Allow-*`.** El navegador no puede leer las
+4. **Ninguna cabecera `Access-Control-Allow-*`.** El navegador no puede leer las
    respuestas desde otro origen.
-6. **El token de cada instancia sobrevive a los recargos.** Si la pagina vuelve
-   a guardar el mismo puerto sin token, se conserva el que habia, para no
-   borrarlo sin querer.
+
+Lo que protege esto es el loopback, no una credencial: el hub escucha solo en
+`127.0.0.1` y las instancias tambien. El `requireToken` del mod sigue existiendo
+para quien exponga Puente a otra red, pero el panel no lo usa ni lo pide.
+
 
 ## Rutas del hub
 
@@ -80,7 +79,7 @@ es: una superficie de control. Lo que lo hace aceptable en local:
 | `GET /` | El panel. |
 | `GET /api/health` | Vivo, y cuantas instancias hay. |
 | `GET /api/instances` | Instancias con su estado actual, sondeadas en paralelo. |
-| `POST /api/instances` | Dar de alta `{name, host, port, token?}`. |
+| `POST /api/instances` | Dar de alta `{name, host, port}`. Sin token. |
 | `DELETE /api/instances/{id}` | Quitar del panel. **No cierra Minecraft.** |
 | `POST /api/discover` | Sondea el rango de puertos y da de alta lo que encuentre. |
 | `POST /api/broadcast/{ruta}` | La misma peticion a todas las instancias, en paralelo. |
@@ -136,7 +135,9 @@ Cada `launch` siembra antes de arrancar:
 
 - Los mods sueltos de `run/mods` (Baritone), que si no solo llegan por classpath
   en la instancia principal.
-- La config con su puerto, un token autogenerado y `requireToken: true`.
+- La config con su puerto, `requireToken: false` y `authToken` vacio. Asi el
+  panel no pide ni guarda credenciales, y una instancia que antes si las exigia
+  deja de pedirlas al volver a arrancarse desde aqui.
 
 ### El mod que hace falta es la variante *api*
 

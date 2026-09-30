@@ -372,7 +372,6 @@ label input { color: var(--text); }
     <label>Nombre<input id="fName" placeholder="Instancia 2" value="Instancia"></label>
     <label>Puerto del puente<input id="fPort" class="n" type="number" value="25581" min="1" max="65535"></label>
     <label>Host<input id="fHost" value="127.0.0.1"></label>
-    <label>Token (opcional)<input id="fToken" placeholder="solo si requireToken=true"></label>
     <p class="hint">Solo se admiten hosts de loopback.</p>
     <div class="row" style="justify-content:flex-end">
       <button class="btn" id="dlgCancel">Cancelar</button>
@@ -947,7 +946,6 @@ el("dlgSave").addEventListener("click", async () => {
       name: el("fName").value,
       host: el("fHost").value,
       port: parseInt(el("fPort").value, 10),
-      token: el("fToken").value,
     }),
   });
   if (res.status === 200) {

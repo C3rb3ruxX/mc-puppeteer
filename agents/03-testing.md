@@ -190,8 +190,8 @@ En `agents/tests/DashboardSmokeTest.java`, con un stub que hace de Puente:
 - El listado marca `online` con el estado real de cada instancia, y una instancia
   apagada sale con `error` en vez de romper el listado.
 - El proxy reenvia `GET` y `POST` con su metodo, su cuerpo y su query string.
-- El hub inyecta `Authorization: Bearer` con el token guardado, y ese token
-  **no** aparece en ninguna respuesta.
+- Ni el sondeo ni el proxy mandan cabecera de autorizacion, y el alta de una
+  instancia no acepta ni anuncia ningun token.
 - Una instancia apagada da `502 instance_offline`; una que no existe, `400`.
 - No se admite dar de alta un host que no sea loopback, ni un dominio (anti-SSRF).
 - Una peticion con `Host: evil.com` da `403 bad_host` (DNS rebinding), y una sin

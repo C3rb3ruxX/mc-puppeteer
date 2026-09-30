@@ -190,12 +190,14 @@ class DashboardServer @JvmOverloads constructor(
 		val host = body.get("host")?.takeIf { !it.isJsonNull }?.asString ?: LOOPBACK
 		val port = body.get("port")?.takeIf { !it.isJsonNull }?.asInt
 			?: throw BadRequest("falta 'port'")
-		val token = body.get("token")?.takeIf { !it.isJsonNull }?.asString.orEmpty()
 
 		if (name.isBlank()) throw BadRequest("falta 'name'")
 		if (port !in 1..65535) throw BadRequest("'port' fuera de rango (1-65535): $port")
 
-		val instance = registry.upsert(name, host, port, registry.withExistingToken(port, token))
+		// Sin token: la pagina no tiene nada que mandar. Un `token` que venga en
+		// el cuerpo se ignora en vez de dar error, para que un guardado antiguo del
+		// navegador, o un curl de la documentacion vieja, no se rompan al pegar.
+		val instance = registry.upsert(name, host, port)
 		send(exchange, 200, json(okBody(instance.toJson())))
 	}
 
@@ -346,12 +348,11 @@ class DashboardServer @JvmOverloads constructor(
 			}
 			scanned++
 			if (found != null) {
-				registry.upsert(found.name, LOOPBACK, found.port, found.token)
+				registry.upsert(found.name, LOOPBACK, found.port)
 				added.add(Json.obj().apply {
 					addProperty("id", "p${found.port}")
 					addProperty("name", found.name)
 					addProperty("port", found.port)
-					addProperty("hasToken", found.token.isNotEmpty())
 				})
 			}
 		}
@@ -396,50 +397,19 @@ class DashboardServer @JvmOverloads constructor(
 		}
 		if (!isPuente) return null
 
-		val token = tokenForPort(port)
-		return Discovered(port, "Instancia $port", token)
-	}
-
-	/**
-	 * Busca el token de un puerto en las carpetas de juego conocidas.
-	 *
-	 * Se leen los ficheros que el propio mod escribe al arrancar, no se le pide
-	 * el token a nadie: asi el secreto nunca sale hacia el navegador y el hub
-	 * no necesita inventar nada.
-	 *
-	 * La ruta de una instancia lanzada por el hub la da [InstanceLauncher], que
-	 * es quien decidio donde vive su carpeta de juego. Para las sueltas se prueba
-	 * `run-instances/p<port>/config` y tambien el `run/config` de una instancia
-	 * montada a mano; el token se busca en los dos y gana el primero que exista.
-	 */
-	private fun tokenForPort(port: Int): String {
-		val candidates = listOf(
-			// La instancia principal, arrancada a mano.
-			Path.of(workingDir(), "run", "config", "mc-puppeteer.json"),
-			// Las que arranca el hub desde el panel.
-			launcher.configFile(port),
-		)
-		return candidates.firstNotNullOfOrNull { file ->
-			runCatching {
-				val json = com.google.gson.JsonParser.parseString(Files.readString(file)).asJsonObject
-				// Solo si ese fichero describe ESTE puerto: si no, su token es
-				// de otra instancia y mandarlo seria mandar una credencial ajena.
-				if (json.get("port")?.asInt != port) return@runCatching null
-				json.get("authToken")?.takeIf { !it.isJsonNull }?.asString?.takeIf { it.isNotBlank() }
-			}.getOrNull()
-		}.orEmpty()
+		return Discovered(port, "Instancia $port")
 	}
 
 	private fun workingDir(): String = System.getProperty("user.dir") ?: "."
 
-	private class Discovered(val port: Int, val name: String, val token: String)
+	private class Discovered(val port: Int, val name: String)
 
 	/**
 	 * Arranca una instancia nueva y la da de alta en el panel.
 	 *
-	 * El token lo genera y siembra [InstanceLauncher] y se registra aqui, asi que
-	 * la pagina recibe el alta con la instancia ya lista para sondear: no hay
-	 * ventana en la que aparezca "apagada" y haya que esperar a que el mod levante.
+	 * Se registra aqui mismo, asi que la pagina recibe el alta con la instancia ya
+	 * lista para sondear: no hay ventana en la que aparezca "apagada" y haya que
+	 * esperar a que el mod levante.
 	 *
 	 * Solo se acepta `port`, y solo del rango permitido. El proceso, su clase y su
 	 * classpath no se negocian: estan en [InstanceLauncher].
@@ -458,7 +428,7 @@ class DashboardServer @JvmOverloads constructor(
 			return
 		}
 
-		val instance = registry.upsert(name, LOOPBACK, port, launcher.tokenForPort(port))
+		val instance = registry.upsert(name, LOOPBACK, port)
 		send(exchange, 200, json(okBody(Json.obj().apply {
 			add("instance", instance.toJson())
 			addProperty("pid", pid)
@@ -590,24 +560,19 @@ class DashboardServer @JvmOverloads constructor(
 	}
 
 	/**
-	 * Anade el token de la instancia a una peticion saliente.
+	 * Anade el Authorization de una peticion saliente.
 	 *
-	 * Lo usan TANTO el sondeo como el proxy, y por eso es una funcion y no una
-	 * linea duplicada: cuando el sondeo se escribio sin cabecera, toda instancia
-	 * con `requireToken=true` (o sea, la configuracion recomendada) aparecia
-	 * como apagada con `HTTP 401` en el panel, aunque la instancia estuviese
-	 * perfectamente viva. El proxy si la mandaba, asi que se veia raro: el chat y
-	 * las acciones funcionaban pero el punto de color de la tarjeta decia que
-	 * no habia nadie.
+	 * No hace nada a proposito. Antes era el sitio donde se inyectaba el token de
+	 * la instancia, y cuando el sondeo se escribio sin cabecera toda instancia
+	 * con `requireToken=true` aparecia apagada con `HTTP 401` aunque estuviese
+	 * viva, mientras el proxy si la mandaba: se veía rarísimo, el chat funcionaba
+	 * pero el punto de color de la tarjeta decia que no habia nadie.
+	 *
+	 * Se deja el gancho porque la forma de ese bug es facil de volver a escribir
+	 * (un `HttpRequest` que se construye en un sitio y se reenvia en otro), pero
+	 * ya no hay token que poner: [InstanceLauncher] siembra `requireToken=false`.
 	 */
-	private fun authorized(builder: HttpRequest.Builder, instance: Instance): HttpRequest.Builder {
-		if (instance.token.isNotEmpty()) {
-			// Deliberadamente **no** se reenvia la Authorization del navegador:
-			// la pagina no necesita conocer el token de cada instancia.
-			builder.header("Authorization", "Bearer ${instance.token}")
-		}
-		return builder
-	}
+	private fun authorized(builder: HttpRequest.Builder, instance: Instance): HttpRequest.Builder = builder
 
 	/**
 	 * Solo se aceptan peticiones cuyo `Host` sea loopback.
