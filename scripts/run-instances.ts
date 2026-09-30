@@ -366,6 +366,11 @@ Opciones:
       --no-wait           No espera a que el mod responda
       --refresh           Vuelve a pedir el run config a Gradle
       --verbose           Muestra toda la salida, no solo lo interesante
+
+Las instancias se lanzan con PUPPETEER_BARITONE_ASYNC=1, que es lo que permite
+que #mine y #goto <bloque> no cuelguen el hilo principal del juego. Para el
+comportamiento antiguo, exporta PUPPETEER_BARITONE_ASYNC=0 antes de lanzarlo.
+
   -h, --help              Esto
 `)
 }
@@ -678,9 +683,17 @@ const launch = (inst: Instance, opts: Options, cfg: RunConfig, argFile: string):
 
 	// El directorio de trabajo ES el gameDir: el loader usa el CWD cuando no
 	// le pasan `--gameDir` (que es el caso del arranque de desarrollo de Loom).
+	//
+	// `PUPPETEER_BARITONE_ASYNC=1` va por defecto en todas las instancias: sin
+	// ella, `#mine` y `#goto <bloque>` dejan el hilo principal de Minecraft
+	// colgado para siempre, porque Baritone espera desde el propio hilo principal
+	// un `CompletableFuture` que solo ese hilo puede completar (ver
+	// `agents/05-api.md`). Va primero en el objeto para que se pueda anular
+	// exportando `PUPPETEER_BARITONE_ASYNC=0` o poniendolo en el `env` de
+	// `scripts/.run-config.json`: lo que viene detras pisa.
 	const proc = spawn(resolveJava(opts), javaArgs(opts, inst, cfg, argFile), {
 		cwd: inst.dir,
-		env: { ...process.env, ...cfg.env, ...glEnv(opts.gl) },
+		env: { PUPPETEER_BARITONE_ASYNC: '1', ...process.env, ...cfg.env, ...glEnv(opts.gl) },
 		stdio: ['ignore', 'pipe', 'pipe'],
 	})
 	inst.proc = proc

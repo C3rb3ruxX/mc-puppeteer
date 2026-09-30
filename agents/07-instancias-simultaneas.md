@@ -239,6 +239,73 @@ juego). Es decir: las respuestas de Baritone hay que leerlas en
 `run-instances/mc1/logs/latest.log`, no en la API. El indice `/baritone` y las
 envias (`/baritone/goto`, `/mine`...) funcionan igual.
 
+## Hallazgo: `mine` cuelga el hilo principal (y como se arregla)
+
+La hipotesis de que compartir la cache de Baritone hiciera que las instancias se
+congelaran **queda descartada**: cada una tiene la suya, con su directorio de
+mundo propio y separado.
+
+```
+run-instances/mc1-9/baritone/127.0.0.1:25565/minecraft/overworld_384/cache/
+run-instances/mc2-9/baritone/127.0.0.1:25565/minecraft/overworld_384/cache/
+```
+
+Lo que congela de verdad es `POST /baritone/mine` (y `POST /baritone/goto` con
+`{"block":...}`) cuando la orden sale del hilo principal: ese hilo se queda
+esperando un `CompletableFuture` de Baritone para siempre, ya con el lock de la
+clase tomado. Detalle completo, volcado de hilos y matriz de comandos en
+[`05-api.md`](05-api.md) (apartado "`mine` y `goto` con bloque").
+
+**Se arregla con una variable de entorno**, porque el futuro si llega a
+completarse: lo completa el hilo principal, asi que basta con no ocuparlo. El
+lanzador la pone solo en todas las instancias, no hay que hacer nada:
+
+```bash
+node scripts/run-instances.ts -n 2     # ya lleva PUPPETEER_BARITONE_ASYNC=1
+```
+
+Con `PUPPETEER_BARITONE_ASYNC=0` en el entorno (o en el `env` de
+`scripts/.run-config.json`) se recupera el comportamiento antiguo, que es el que
+cuelga la instancia.
+
+**Ojo con el panel**: `mine` (y todo lo que no sea una consulta simple) no va al
+endpoint `/baritone/mine` sino a `POST /chat`, que es otra puerta. Las dos
+respetan la variable, pero si alguna vez se cuelga una instancia veras que ya no
+responde ni `/health`: el pool HTTP son 4 hilos y cada peticion que espera al
+hilo principal los ocupa 5 s, asi que a los cuatro el servidor deja de
+atender cualquier peticion de esa instancia.
+
+Verificado con las dos instancias minando a la vez: `#mine minecraft:oak_log` en
+mc1 y mc2, las dos siguen con `/status` en `200`, Baritone crea el proceso de
+minado en las dos (`Mine BlockOptionalMetaLookup{[BlockOptionalMeta{block=Block{
+minecraft:oak_log}...}]`) y calcula rutas (`PathNode map size: 35825`, `Path
+goes for 40.36 blocks`). `#cancel` las para. Sin la variable, el mismo `#mine`
+deja cada instancia en `503` permanente.
+
+Como se ve desde el panel cuando **no** lleva la variable:
+
+| Endpoint | Instancia sana | Instancia colgada |
+|---|---|---|
+| `GET /puppeteer/health` | `200` en ~3 ms | `200` en ~3 ms |
+| `GET /puppeteer/status` | `200` | `503` a los 5 s |
+
+La fila se queda **amarilla** (el proceso vive, el estado no llega) y `log <n>`
+muestra que el ultimo log del juego es el del propio `#mine`. La otra instancia
+no se entera, asi que se puede seguir trabajando con ella mientras la colgada
+hay que reiniciarla. `scripts/tui.ts` avisa en el feed antes de mandar `#mine` o
+`#goto <bloque>` (los manda igualmente).
+
+El precio del modo asincrono es una excepcion en el log del juego por cada orden
+con bloque, que Baritone captura y de la que se recovers:
+
+```
+baritone.az: java.lang.IllegalStateException: BlockStateInterface must be
+constructed on the main thread
+```
+
+Lo demas (`#goto x y z`, `#surface`, `#sethome`, `#cancel`, las consultas)
+funciona con y sin la variable.
+
 ## Notas
 
 - **Presupuesto**: 2G por instancia es lo que pide Minecraft de serie. Con 6

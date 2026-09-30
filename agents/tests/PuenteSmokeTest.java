@@ -400,7 +400,9 @@ public class PuenteSmokeTest {
 			{"/baritone/goto", "{\"y\":64}", "#goto 64"},
 			{"/baritone/goto", "{\"block\":\"diamond_ore\"}", "#goto diamond_ore"},
 			{"/baritone/goal", "{\"x\":1,\"y\":2,\"z\":3}", "#goal 1 2 3"},
-			{"/baritone/mine", "{\"block\":\"diamond_ore\",\"amount\":16}", "#mine diamond_ore 16"},
+			// En Baritone la cantidad va antes del bloque: `#mine 16 diamond_ore`.
+			// Al reves Baritone responde `Error at argument #2` y no mina nada.
+			{"/baritone/mine", "{\"block\":\"diamond_ore\",\"amount\":16}", "#mine 16 diamond_ore"},
 			{"/baritone/mine", "{\"block\":\"diamond_ore\"}", "#mine diamond_ore"},
 			{"/baritone/build", "{\"file\":\"base.schematic\",\"x\":1,\"y\":2,\"z\":3}", "#build base.schematic 1 2 3"},
 			{"/baritone/build", "{\"file\":\"base.schematic\"}", "#build base.schematic"},

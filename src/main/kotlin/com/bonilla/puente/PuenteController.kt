@@ -5,6 +5,8 @@ import com.bonilla.puente.http.Json
 import com.bonilla.puente.http.Json.optInt
 import com.bonilla.puente.http.Json.optString
 import com.google.gson.JsonObject
+import org.slf4j.Logger
+import org.slf4j.LoggerFactory
 /**
  * Logica de negocio expuesta por HTTP.
  *
@@ -48,6 +50,15 @@ class PuenteController(
 		// Se rechaza explicitamente para que el error sea visible y no silencioso.
 		if (message.startsWith("/")) {
 			throw HttpError(400, "leading_slash", "usa /puppeteer/command para comandos; aqui no se admite la barra inicial")
+		}
+		// Un "#" es una orden de Baritone, y Baritone la ejecuta en el hilo que
+		// envia el chat: es el mismo caso que [baritone], con el mismo cuelgue del
+		// hilo principal. Sin esto, mandar `#mine ...` por `/chat` se colgaba
+		// aunque `PUPPETEER_BARITONE_ASYNC=1` este puesto, porque esta ruta no
+		// miraba la variable (y es la que usa el panel para casi todo).
+		if (baritoneAsync && message.startsWith("#")) {
+			sendOffMainThread(message)
+			return message
 		}
 		mainThread.callOnMainThread { bridge.sendChat(message) }
 		return message
@@ -127,6 +138,9 @@ class PuenteController(
 
 	// ------------------------------------------------------------- Baritone
 
+	/** Ver [baritone]: con `PUPPETEER_BARITONE_ASYNC=1` la orden no pasa por el hilo principal. */
+	private val baritoneAsync = System.getenv("PUPPETEER_BARITONE_ASYNC") == "1"
+
 	/**
 	 * Envia un comando de Baritone como **mensaje de chat**, nunca como comando
 	 * de servidor. Es la diferencia que hace que esto funcione: Baritone
@@ -135,10 +149,47 @@ class PuenteController(
 	 *
 	 * La respuesta de Baritone llega al chat, asi que se lee luego por
 	 * `/chat` o `/chat/history`.
+	 *
+	 * Baritone ejecuta lo que llega por el chat **en el hilo que lo envia**, y
+	 * hay ordenes (`mine`, `goto <bloque>`) cuyos argumentos se traducen en el
+	 * registro de bloques justo ahi. Ese init hace `join()` de un
+	 * `CompletableFuture<RegistryAccess>` que Baritone creo pidiéndole al
+	 * servidor el registro dinamico, y como se espera desde el hilo principal el
+	 * juego se queda colgado para siempre (ver `agents/05-api.md`). Con
+	 * `PUPPETEER_BARITONE_ASYNC=1` la orden sale desde un hilo propio y el
+	 * principal sigue libre, que es lo que ese futuro necesita para completarse.
+	 *
+	 * Es opt-in porque ejecutar Baritone fuera del hilo principal rompe la
+	 * invariante de esta clase (no tocar el juego desde un hilo HTTP) y no
+	 * siempre es seguro.
 	 */
 	fun baritone(command: String): String {
+		if (baritoneAsync) {
+			sendOffMainThread(command)
+			return command
+		}
 		mainThread.callOnMainThread { bridge.sendChat(command) }
 		return command
+	}
+
+	/**
+	 * Envia el texto por el chat desde un hilo propio en vez del principal.
+	 *
+	 * La orden se responde con 202 antes de que Baritone la ejecute, asi que si
+	 * aqui falla solo queda el log del juego: se deja escrito para que un
+	 * `#mine` que no llega a minar no pase desapercibido.
+	 */
+	private fun sendOffMainThread(message: String) {
+		Thread(
+			{
+				try {
+					bridge.sendChat(message)
+				} catch (e: Throwable) {
+					logger.error("No se pudo enviar la orden de Baritone '$message'", e)
+				}
+			},
+			"puente-baritone",
+		).apply { isDaemon = true }.start()
 	}
 
 	fun baritoneReadOnly(name: String, query: String?): String = baritone(BaritoneTranslator.readOnly(name, query))
@@ -228,5 +279,7 @@ class PuenteController(
 
 		/** Puerto por defecto de Minecraft, no el del servidor HTTP de Puente. */
 		const val DEFAULT_MINECRAFT_PORT = 25565
+
+		val logger: Logger = LoggerFactory.getLogger(PuenteController::class.java)
 	}
 }

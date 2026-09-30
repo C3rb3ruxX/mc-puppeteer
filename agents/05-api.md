@@ -417,6 +417,162 @@ pendiente de arreglar en el codigo.
   comandos con `#` se enviarian al chat publico del servidor.
 - Estar conectado a un mundo.
 
+### `mine` y `goto` con bloque: hace falta `PUPPETEER_BARITONE_ASYNC=1`
+
+Verificado con Baritone 1.14.0 sobre Minecraft 1.21.5 (2 instancias del
+lanzador, servidor local en modo offline). Los dos comandos cuyo argumento es el
+**nombre de un bloque** dejan el hilo principal de Minecraft colgado **para
+siempre** si se envian desde el hilo principal, que es lo que hacia el mod por
+defecto:
+
+| Endpoint | Comando | Con el modo por defecto |
+|---|---|---|
+| `POST /baritone/mine {"block":"oak_log"}` | `#mine oak_log` | Hilo principal muerto |
+| `POST /baritone/goto {"block":"oak_log"}` | `#goto oak_log` | Hilo principal muerto |
+
+Lo que se ve desde fuera:
+
+1. El propio `POST` no llega a responder: `503 main_thread_timeout` a los 5 s.
+2. A partir de ahi, **todo** lo que necesite el hilo principal da `503` en 5 s:
+   `/status`, `/chat/history`, `/baritone/*`, `POST /chat`...
+3. `GET /health` sigue en `200` en 3 ms: el proceso vive, el juego no.
+4. No se recupera solo (comprobado 10 minutos). Solo reiniciando la instancia.
+
+#### Como evitarlo
+
+El mod manda la orden de Baritone desde un hilo propio cuando ve
+`PUPPETEER_BARITONE_ASYNC=1`, y **entonces todo funciona**. El lanzador de
+instancias ya la pone en todas, asi que con el flujo normal no hay que hacer
+nada:
+
+```bash
+node scripts/run-instances.ts -n 2     # ya lleva PUPPETEER_BARITONE_ASYNC=1
+```
+
+Para una instancia lanzada a mano, o para recuperar el comportamiento antiguo:
+
+```bash
+PUPPETEER_BARITONE_ASYNC=1 java ...   # activator el modo
+PUPPETEER_BARITONE_ASYNC=0 node scripts/run-instances.ts -n 2   # desactivarlo
+```
+
+Comprobado con las dos instancias a la vez: `#mine minecraft:oak_log` en mc1 y
+mc2, las dos siguen con `/status` en `200`, Baritone acepta la orden
+(`> mine minecraft:oak_log`), crea el proceso de minado
+(`Class: baritone.kd`, `Mine BlockOptionalMetaLookup{[BlockOptionalMeta{block=
+Block{minecraft:oak_log}...}]`), calcula rutas (`PathNode map size: 35825`,
+`Path goes for 40.36 blocks`) y `#cancel` lo para. Sin la variable, el mismo
+`#mine` deja cada instancia en `503` permanente.
+
+Lo que se paga: Baritone se ejecuta fuera del hilo principal y por eso
+registra una vez por orden affected
+
+```
+baritone.az: java.lang.IllegalStateException: BlockStateInterface must be
+constructed on the main thread
+```
+
+Baritone la captura y continua (el minado arranca igual), asi que es ruido en
+el log, no un fallo. Si alguna vez la orden no llegara a ejecutarse, el mod
+escribe `No se pudo enviar la orden de Baritone '<orden>'` en el log del juego,
+porque el `202` se responde antes de que Baritone ejecute.
+
+#### Por que se cuelga
+
+Volcado de hilos (`jcmd <pid> Thread.print`) del caso colgado:
+
+```
+"Render thread" ... waiting on condition
+	at java.util.concurrent.CompletableFuture.join
+	at baritone.api.utils.BlockOptionalMeta$a.registryAccess
+	- locked <0x...> (a java.lang.Class for baritone.api.utils.BlockOptionalMeta)
+	...
+	at com.bonilla.puente.PuenteController.baritone(PuenteController.kt:140)
+	at com.bonilla.puente.client.ClientBridge.sendChat(ClientBridge.kt:103)
+```
+
+Baritone ejecuta el comando **dentro del envio del chat**, en el hilo principal,
+y ahi inicializa `BlockOptionalMeta`. Ese init hace `join()` de un
+`CompletableFuture<RegistryAccess>` que el propio Baritone creo pidiéndole al
+servidor el registro dinamico `BLOCK` (`baritone.api.utils.BlockOptionalMeta$a`
+es su `MinecraftClientContext`: se fabrica con `Unsafe.allocateInstance` y su
+`registryAccess()` es ese `join()`). Ese futuro **si** se completa, pero lo
+completa el hilo principal: al esperarlo desde el propio hilo principal se
+auto-bloquea, y como el `join()` se hace con el lock de la clase ya tomado, no
+hay vuelta. Por eso basta con dejar el hilo principal libre (mandando la orden
+desde otro hilo) para que el futuro llegue a completarse.
+
+No es culpa de mc-puppeteer (el modulo solo hace `sendChat`) ni de que las
+instancias compartan cache: cada una tiene su propio
+`run-instances/mcN/baritone/<servidor>/<dimension>/cache`.
+
+#### El agujero que quedaba: `POST /chat`
+
+Lo anterior solo cubria `POST /baritone/*`. `POST /chat` con
+`{"message":"#mine ..."}` es la misma orden de Baritone pero entra por otra
+puerta, y esa puerta **no miraba la variable**: siempre iba por
+`MainThreadBridge`, o sea por el hilo principal. Por eso el cuelgue seguia
+apareciendo con `PUPPETEER_BARITONE_ASYNC=1` puesta, y por eso seguia
+apareciendo justo cuando se usaba el panel: `scripts/tui.ts` solo manda al
+endpoint propio un puñado de consultas (`BARITONE_QUERIES`); **todo lo demas, y
+`mine` entre ello, va por `/chat`** para poder pasar argumentos libres
+(`#goto 100 64 200`).
+
+Volcado del caso colgado por `/chat` (3 instancias, `mine` a las tres por el
+panel; mc2 y mc3 muertos, mc1 viva porque ya tenia `BlockOptionalMeta`
+inicializado de una prueba anterior por el endpoint propio):
+
+```
+"Render thread" ... waiting on condition
+	at java.util.concurrent.CompletableFuture.join
+	at baritone.api.utils.BlockOptionalMeta$a.registryAccess
+	- locked <0x...> (a java.lang.Class for baritone.api.utils.BlockOptionalMeta)
+	...
+	at com.bonilla.puente.client.ClientBridge.sendChat(ClientBridge.kt:103)
+	at com.bonilla.puente.PuenteController.sendChat$lambda$0(PuenteController.kt:54)
+	at com.bonilla.puente.MainThreadBridge.callOnMainThread(MainThreadBridge.kt:43)
+```
+
+La linea `PuenteController.sendChat` (y no `PuenteController.baritone`) es la
+pista: la orden entro por `/chat`. **`POST /chat` con un mensaje que empieza por
+`#` ahora respeta la variable** y sale por el hilo propio, igual que
+`/baritone/*`. Con eso las dos puertas estan cubiertas.
+
+Efecto secundario que conviene conocer: cuando el hilo principal ya esta
+colgado, **toda** la API de esa instancia parece congelada, no solo lo que toque
+a Baritone. El pool HTTP son 4 hilos (`httpThreads`) y cada peticion que espera
+al hilo principal los ocupa 5 s (`requestTimeoutMs`), asi que a los cuatro
+llamadas el servidor deja de responder *a todo*, `/health` incluido. Por eso, si
+una instancia ya esta colgada, mandar `mine` tampoco funciona: no es que `mine`
+la colgara, es que la peticion se queda en la cola.
+
+#### Lo que funciona (verificado en la misma sesion, con la variable puesta)
+
+| Endpoint | Comando | Resultado |
+|---|---|---|
+| `POST /baritone/mine` | `#mine <bloque>` | Minando de verdad |
+| `POST /baritone/mine` con `amount` | `#mine 2 dirt` | Minando de verdad |
+| `POST /chat` con `{"message":"#mine dirt"}` | `#mine dirt` | Minando de verdad (es la ruta del panel) |
+| `POST /baritone/goto` con `x`/`y`/`z` | `#goto 100 64 100` | Pathing real: `PathNode map size: 30558`, `72948 nodes per second` |
+| `GET /baritone/version` | `#version` | `Null version (normal en dev)` |
+| `GET /baritone/proc` | `#proc` | `Class: baritone.kd` con el minado activo |
+| `GET /baritone/eta`, `modified`, `paused` | idem | OK |
+| `GET /baritone/wp` | `#waypoints` | OK |
+| `GET /baritone/help?q=mine` | `#help mine` | OK |
+| `GET /baritone/find?block=diamond_ore` | `#find diamond_ore` | No cuelga, pero responde `No positions known, are you sure the blocks are cached?` porque la cache no llega a cargarse |
+| `POST /baritone/top` | `#surface` | OK |
+| `POST /baritone/sethome` | `#sethome` | OK |
+| `POST /baritone/stop` | `#cancel` | OK |
+
+Lo de la cache tiene el mismo origen: Baritone decide que el mundo es una replay
+(`World seems to be a replay. Not loading Baritone cache.`) porque su chequeo
+`Minecraft.method_1558().method_52811()` da true en este entorno, asi que
+`#find` no tiene posiciones de donde mirar.
+
+Lo que queda por determinar: si el modo asincrono tambien hace falta en un
+Fabric de produccion, o si ahi el futuro se completa solo por el orden de
+inicializacion de Baritone.
+
 ### Consultas (`GET`)
 
 ```powershell
@@ -438,7 +594,7 @@ Disponibles sin parametro: `version`, `proc`, `eta`, `modified`, `paused`, `wp`,
 
 ```powershell
 curl.exe -s -X POST "$BASE/baritone/goto" -H $AUTH -d '{"x":1000,"y":64,"z":500}'
-curl.exe -s -X POST "$BASE/baritone/mine" -H $AUTH -d '{"block":"diamond_ore","amount":16}'
+curl.exe -s -X POST "$BASE/baritone/mine" -H $AUTH -d '{"block":"diamond_ore","amount":16}'   # necesita PUPPETEER_BARITONE_ASYNC=1
 curl.exe -s -X POST "$BASE/baritone/build" -H $AUTH -d '{"file":"base.schematic"}'
 curl.exe -s -X POST "$BASE/baritone/follow" -H $AUTH -d '{"target":"Alex"}'
 curl.exe -s -X POST "$BASE/baritone/cleararea" -H $AUTH -d '{"radius":5}'
@@ -446,6 +602,10 @@ curl.exe -s -X POST "$BASE/baritone/stop?force"
 curl.exe -s -X POST "$BASE/baritone/pause"
 curl.exe -s -X POST "$BASE/baritone/thisway" -H $AUTH -d '{"distance":50}'
 ```
+
+Los que llevan nombre de bloque (`mine`, `goto {"block":...}`) cuelgan la
+instancia si el mod va con el modo por defecto; con `PUPPETEER_BARITONE_ASYNC=1`
+funcionan (ver el apartado de arriba).
 
 `goto` admite las tres formas que entiende Baritone:
 
@@ -496,13 +656,16 @@ enviado, pero **lo que Baritone responde llega como chat**, no como cuerpo de
 la respuesta HTTP. Para leerlo:
 
 ```powershell
-curl.exe -s -X POST "$BASE/baritone/mine" -H $AUTH -d '{"block":"diamond_ore"}'
+curl.exe -s -X POST "$BASE/baritone/goto" -H $AUTH -d '{"x":1000,"y":64,"z":500}'
 Start-Sleep -Seconds 2
 curl.exe -s "$BASE/chat?limit=20"
 ```
 
 Alternativa inmediata, sin esperar: `POST /chat` con el prefijo a mano, p. ej.
-`{"message":"#mine diamond_ore"}`. Es lo mismo que hace `/baritone/mine`.
+`{"message":"#goto 1000 64 500"}`. Es lo mismo que hace `/baritone/goto`. Con
+`#mine` solo funciona con `PUPPETEER_BARITONE_ASYNC=1`: sin esa variable no
+llega a responder porque la instancia se queda colgada antes (ver el apartado de
+los comandos con bloque).
 
 ### Validacion
 
@@ -514,6 +677,10 @@ HTTP no pueda inyectar texto en un comando de Baritone:
 - Schematicos: `[A-Za-z0-9_-]{1,64}\.schematic`
 - Coordenadas: -30 000 000 a 30 000 000 (altura: -64 a 320)
 - `amount` de `mine`: 1 a 4096. Opcional: sin el, Baritone mina hasta agotar.
+  Ojo con la firma de Baritone, que es `#mine [<cantidad>] <bloque>`: la
+  cantidad va **primera** (`{"block":"diamond_ore","amount":16}` se traduce a
+  `#mine 16 diamond_ore`). Al reves, Baritone contesta
+  `Error at argument #2: Expected ...` y no mina nada.
 - `tunnel`/`cleararea`: 1 a 64
 
 Un valor fuera de estos patrones da `400 invalid_field`, y el error **no**
