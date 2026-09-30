@@ -678,9 +678,16 @@ const launch = (inst: Instance, opts: Options, cfg: RunConfig, argFile: string):
 
 	// El directorio de trabajo ES el gameDir: el loader usa el CWD cuando no
 	// le pasan `--gameDir` (que es el caso del arranque de desarrollo de Loom).
+	//
+	// `PUPPETEER_BARITONE_ASYNC=1` manda las ordenes de Baritone fuera del hilo
+	// principal. Sin esto, `#mine` y `#goto <bloque>` lo ocupan mientras buscan
+	// y el resto de la API (empezando por `/status`) da `503` hasta que
+	// terminan: la instancia parece apagada cuando solo esta trabajando. Va
+	// antes de `cfg.env` para que un `PUPPETEER_BARITONE_ASYNC=0` explicito en
+	// la configuracion lo pueda desactivar.
 	const proc = spawn(resolveJava(opts), javaArgs(opts, inst, cfg, argFile), {
 		cwd: inst.dir,
-		env: { ...process.env, ...cfg.env, ...glEnv(opts.gl) },
+		env: { ...process.env, PUPPETEER_BARITONE_ASYNC: '1', ...cfg.env, ...glEnv(opts.gl) },
 		stdio: ['ignore', 'pipe', 'pipe'],
 	})
 	inst.proc = proc

@@ -186,11 +186,18 @@ object BaritoneTranslator {
 
 	fun find(block: String): String = cmd("find") + " " + requireToken("block", block, BLOCK)
 
+	/**
+	 * `#mine [<cantidad>] <bloque> [<bloque>...]`.
+	 *
+	 * La cantidad va **primera**, delante del bloque. Mandandola detras,
+	 * Baritone contesta `Error at argument #2: Expected ...` y no mina nada
+	 * (comprobado contra Baritone de 1.21.5). Sin cantidad mina todos los
+	 * bloques que encuentre; con ella, solo esos. Acepta varios bloques a
+	 * continuacion, pero por la API se manda uno solo.
+	 */
 	fun mine(block: String, amount: Int?): String {
-		// `amount` es opcional: sin el, Baritone mina hasta que se agote el
-		// bloque. Si viene, se valida el rango.
-		val base = cmd("mine") + " " + requireToken("block", block, BLOCK)
-		return if (amount == null) base else "$base ${requireRange("amount", amount, 1, MAX_MINE_AMOUNT)}"
+		val cantidad = if (amount == null) "" else " ${requireRange("amount", amount, 1, MAX_MINE_AMOUNT)}"
+		return cmd("mine") + cantidad + " " + requireToken("block", block, BLOCK)
 	}
 
 	fun build(file: String, origin: Triple<Int, Int, Int>?): String {

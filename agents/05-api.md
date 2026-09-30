@@ -539,6 +539,10 @@ curl.exe -s -X POST "$BASE/baritone/pause"
 curl.exe -s -X POST "$BASE/baritone/thisway" -H $AUTH -d '{"distance":50}'
 ```
 
+`mine` pone la cantidad delante del bloque, porque es lo que espera Baritone
+(`#mine 16 diamond_ore`, no `#mine diamond_ore 16`). Va igual por HTTP que por el
+prefijo `#` del chat, que lo genera el mismo traductor.
+
 `goto` admite las tres formas que entiende Baritone:
 
 | Cuerpo | Comando |
@@ -601,11 +605,20 @@ aparece ni el exito ni el error. Si la orden fallaba, el unico rastro era el
 Alternativa inmediata, sin esperar: `POST /chat` con el prefijo a mano, p. ej.
 `{"message":"#mine diamond_ore"}`. Es lo mismo que hace `/baritone/mine`.
 
-Un detalle que marea: en 1.21.5 `acacia_block` no es un bloque valido y Baritone
-contesta `Error at argument #2: Expected ForBlockOptionalMeta`. El nombre
-correcto es `acacia_log`, que si es un tronco. Esa respuesta tampoco salia por
-`/chat`, y con ella se puede distinguir una orden mala de una orden que Baritone
-ha CFDendido mal.
+Un detalle que marea, y que costaba un rato encontrar: **`#mine` recibe la
+cantidad ANTES del bloque**. Baritone espera `#mine <cantidad> <bloque>`, asi que
+`#mine acacia_block 32` se interpreta como "minar 32 unidades de `acacia_block`" y
+contesta `Error at argument #2: Expected ForBlockOptionalMeta`: el error habla del
+argumento 2, que Baritone cree que es el bloque, cuando el que esta mal es el 1.
+`BaritoneTranslator` ya genera el orden correcto, `#mine 32 acacia_log`, y
+`POST /baritone/mine` lo hace igual porque pasa por el mismo traductor.
+
+Ojo con el diagnostico: ese mismo error aparece con `acacia_block`, que en
+1.21.5 no es un bloque valido (el tronco es `acacia_log`), o sea que el ejemplo
+fallaba por las dos razones a la vez. Con el orden arreglado, un
+`Error at argument #2` significa de verdad "no conozco ese bloque", y ahi si es
+el nombre. Esa respuesta tampoco sale por `/chat`, y con ella se puede
+distinguir una orden mala de una orden que Baritone ha entendido mal.
 
 ### Validacion
 
@@ -648,6 +661,24 @@ Si el hilo principal no contesta a tiempo, el error es:
 ```
 
 con HTTP **503**. Suele significar que el juego esta colgado o cargando.
+
+### El caso raro: ocupado por Baritone
+
+Con Baritone, ese 503 no es un fallo: es una orden a medias. `#mine` y
+`#goto <bloque>` se ejecutan de forma asincrona dentro del juego y **ocupan** el
+hilo principal mientras buscan el bloque. Una peticion que llegue en ese momento
+no se cuelga para siempre, pero `/status` tampoco responde, y durante toda esa
+ventana la instancia parece apagada cuando esta trabajando.
+
+Por eso, con la variable de entorno `PUPPETEER_BARITONE_ASYNC=1`, las ordenes de
+Baritone y los mensajes de chat que empiezan por `#` se lanzan **fuera** del
+hilo principal: el cliente devuelve `202` y sigue. Es opt-in porque ejecutar
+Baritone desde otro hilo rompe la invariante de "no tocar el juego desde un hilo
+HTTP", asi que no se activa solo. El lanzador del panel la pone siempre al
+arrancar una instancia, y `scripts/run-instances.ts` tambien.
+
+Con la variable puesta, el diagnostico cambia: si `/status` da `503` pero
+`/health` responde, la instancia esta ocupada, no apagada.
 
 ---
 

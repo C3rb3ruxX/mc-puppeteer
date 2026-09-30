@@ -281,6 +281,22 @@ class InstanceLauncher @JvmOverloads constructor(
 			.directory(dir.toFile())
 			.redirectOutput(ProcessBuilder.Redirect.appendTo(log.toFile()))
 			.redirectError(ProcessBuilder.Redirect.appendTo(log.toFile()))
+			.also { builder ->
+				// Sin esto, el primer `#mine` manda la orden desde el hilo principal
+				// del juego, Baritone se queda esperando alli un `CompletableFuture`
+				// del registro dinamico y el cliente se cuelga entero: a partir de
+				// entonces no responde ni a `/status`, asi que la tarjeta se queda
+				// en "muerta" y cualquier accion posterior a esa instancia falla
+				// por tiempo de espera. Era el fallo de las "acciones a todas".
+				//
+				// El lanzador de la otra rama (`scripts/run-instances.ts`) lo hace
+				// igual, y es opt-in en el mod para no ejecutar Baritone fuera del
+				// hilo principal sin querer. Se respeta una variable que venga en el
+				// entorno del hub, por si alguien quiere el comportamiento viejo.
+				if (System.getenv(ENV_BARITONE_ASYNC) == null) {
+					builder.environment()[ENV_BARITONE_ASYNC] = "1"
+				}
+			}
 			.start()
 
 		live[port] = process.pid()
@@ -345,5 +361,8 @@ class InstanceLauncher @JvmOverloads constructor(
 
 	companion object {
 		private val GSON = GsonBuilder().setPrettyPrinting().create()
+
+		/** Ver [PuenteController.baritone]: saca las ordenes de Baritone del hilo principal. */
+		private const val ENV_BARITONE_ASYNC = "PUPPETEER_BARITONE_ASYNC"
 	}
 }

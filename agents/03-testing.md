@@ -15,11 +15,14 @@ Hay dos bancos, y los dos se ejecutan con `java` directamente:
 | Banco | Aserciones | Que necesita |
 |---|---|---|
 | `PuenteSmokeTest` | 195 | Nada, solo el JDK y el classpath del proyecto |
-| `DashboardSmokeTest` | 35 | Nada, levanta un stub HTTP |
+| `DashboardSmokeTest` | 40 | Nada, levanta un stub HTTP |
 
-230 en total. Ojo con la cuenta: el numero mas alto de la etiqueta no es el
-total. En `PuenteSmokeTest` las etiquetas llegan a `[156]`, pero hay 35
-aserciones mas con sufijo de letra (`[26a]`, `[27b]`…), asi que son 195.
+235 en total. Ojo con la cuenta: el numero mas alto de la etiqueta no es el
+total. En `PuenteSmokeTest` las etiquetas llegan a `[156]` y hay 35 con sufijo de
+letra (`[26a]`, `[27b]`â€¦), y algunas etiquetas se repiten porque el `check` esta
+dentro de un bucle: 195 en total. Lo que manda es lo que imprime el banco al
+acabar (`=== 40 pruebas, 0 fallos ===` en el del hub, `>>> TODAS LAS PRUEBAS
+PASARON` en el otro), no la suma de etiquetas.
 
 ---
 
@@ -364,8 +367,8 @@ inexistente, la prueba falla en ambos sentidos (`faltan: [elytra]`,
 | Que los comandos generados los entienda Baritone | Se contratan los **nombres** contra el source, pero no la semantica de cada argumento. Un `goto x y z` mal construido pasaria el test. |
 | `ChatCapture` (eventos de Fabric) | Igual: los eventos solo se disparan con un mundo real cargado. |
 | Comportamiento con el juego en pausa, sin conexion, o en medio de una transicion de mundo | Es el escenario mas delicado de todos (ver abajo). |
-| Medicion de impacto en FPS | No medido. Ver `02-implementacion.md` §5. |
-| HTTPS / lista de IPs permitidas | No implementado a proposito. Ver `02-implementacion.md` §6. |
+| Medicion de impacto en FPS | No medido. Ver `02-implementacion.md` Â§5. |
+| HTTPS / lista de IPs permitidas | No implementado a proposito. Ver `02-implementacion.md` Â§6. |
 
 ### El hueco que mas me preocupa
 

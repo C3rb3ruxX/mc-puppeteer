@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Puente · Panel de instancias</title>
+<title>Puente Â· Panel de instancias</title>
 <style>
 :root {
   --bg: #070a10;
@@ -123,6 +123,11 @@ input:focus, select:focus {
 }
 input.n { width: 88px; }
 input.grow { flex: 1; }
+label.pick {
+  display: inline-flex; align-items: center; cursor: pointer;
+  margin-right: 2px; accent-color: var(--accent);
+}
+label.pick input { width: 15px; height: 15px; cursor: pointer; }
 
 /* ---------- resumen ---------- */
 main { padding: 22px 24px 40px; max-width: 1560px; margin: 0 auto; }
@@ -167,6 +172,8 @@ main { padding: 22px 24px 40px; max-width: 1560px; margin: 0 auto; }
 .card.st-menu { --st: var(--warn); }
 .card.st-dead { --st: var(--bad); }
 .card.st-off  { --st: #5d6875; }
+/* Occupada es entre menu y apagada: el proceso contesta a /health. */
+.card.st-busy { --st: #ffb454; }
 .card::before {
   content: ""; position: absolute; top: 0; left: 0; right: 0; height: 3px;
   background: linear-gradient(90deg, var(--st), transparent 85%);
@@ -341,7 +348,7 @@ label input { color: var(--text); }
     </span>
     <span>
       <h1>Puente</h1>
-      <span class="sub" id="hubInfo">conectando…</span>
+      <span class="sub" id="hubInfo">conectandoâ€¦</span>
     </span>
   </div>
   <span class="dot on" id="hubDot"></span>
@@ -355,13 +362,17 @@ label input { color: var(--text); }
 
 <div class="bar">
   <div class="bar-grp">
-    <span class="bar-lbl">Acciones a todas</span>
-    <input id="bcPath" value="chat" placeholder="chat, command, baritone/mine…">
-    <input id="bcBody" class="n" placeholder='{"message":"hola"}'>
-    <button class="btn" data-all="run">Enviar a todas</button>
+    <span class="bar-lbl">A las instancias</span>
+    <select id="bcTarget">
+      <option value="all">todas</option>
+      <option value="sel">las seleccionadas</option>
+    </select>
+    <select id="bcAction"></select>
+    <input id="bcArg" class="grow" placeholder="...">
+    <button class="btn" data-all="run">Enviar</button>
   </div>
   <div class="bar-grp">
-    <span class="bar-lbl" id="launchInfo">…</span>
+    <span class="bar-lbl" id="launchInfo">â€¦</span>
     <input id="newPort" class="n" type="number" placeholder="puerto" min="25580" max="25599">
     <button class="btn primary" data-all="launch">Arrancar</button>
   </div>
@@ -371,7 +382,7 @@ label input { color: var(--text); }
   <div class="summary" id="summary"></div>
   <div class="grid" id="grid"></div>
   <p class="empty-note" id="noInstances" style="display:none">
-    No hay instancias. Pulsa «+ Instancia» para añadir una.
+    No hay instancias. Pulsa Â«+ InstanciaÂ» para aÃ±adir una.
   </p>
 </main>
 
@@ -386,7 +397,7 @@ label input { color: var(--text); }
     <p class="hint">Solo se admiten hosts de loopback.</p>
     <div class="row" style="justify-content:flex-end">
       <button class="btn" id="dlgCancel">Cancelar</button>
-      <button class="btn primary" id="dlgSave">Añadir</button>
+      <button class="btn primary" id="dlgSave">AÃ±adir</button>
     </div>
   </div>
 </dialog>
@@ -436,6 +447,7 @@ const state = {
   expanded: {},    // id -> bool
   chat: {},        // id -> [{text, kind}]
   screen: {},      // id -> { open: bool, lines: [string] }
+  sel: {},         // id -> bool, marcadas para las acciones a varias
   busy: {},        // id -> bool
   drafts: {},      // "id:campo" -> lo escrito y todavia no enviado
 };
@@ -463,7 +475,7 @@ async function loadScreenChat(id) {
     s.lines = res.body.data.lines;
   } else {
     const e = res.body && res.body.error;
-    s.lines = [`No se pudo leer: ${e ? e.code + " — " + e.message : "HTTP " + res.status}`];
+    s.lines = [`No se pudo leer: ${e ? e.code + " â€” " + e.message : "HTTP " + res.status}`];
   }
 }
 
@@ -478,7 +490,7 @@ async function toggleScreenChat(id) {
 function screenChatHtml(id) {
   const s = state.screen[id];
   if (!s || !s.lines || !s.lines.length) {
-    return `<p class="empty-note">Sin lineas que enseñar.</p>`;
+    return `<p class="empty-note">Sin lineas que enseÃ±ar.</p>`;
   }
   const cuerpo = s.lines.slice().reverse().map(line => {
     const esBari = line.indexOf("[Baritone]") >= 0;
@@ -499,13 +511,13 @@ async function act(id, path, body, label) {
       body: body === undefined ? undefined : JSON.stringify(body),
     });
     if (res.status >= 200 && res.status < 300) {
-      log(id, `✓ ${label}`, "ok");
-      toast(`${label} — ok`, "ok");
+      log(id, `âœ“ ${label}`, "ok");
+      toast(`${label} â€” ok`, "ok");
     } else {
       const e = res.body && res.body.error;
-      const msg = e ? e.code + " — " + e.message : "HTTP " + res.status;
-      log(id, `✗ ${label}: ${msg}`, "err");
-      toast(`${label} — ${msg}`, "err");
+      const msg = e ? e.code + " â€” " + e.message : "HTTP " + res.status;
+      log(id, `âœ— ${label}: ${msg}`, "err");
+      toast(`${label} â€” ${msg}`, "err");
     }
     // El "ok" de arriba solo dice que la orden salio de aqui. Lo que de verdad
     // responde es el juego, asi que si el chat en pantalla esta abierto se
@@ -516,8 +528,8 @@ async function act(id, path, body, label) {
       render();
     }
   } catch (err) {
-    log(id, `✗ ${label}: ${err.message}`, "err");
-    toast(`${label} — ${err.message}`, "err");
+    log(id, `âœ— ${label}: ${err.message}`, "err");
+    toast(`${label} â€” ${err.message}`, "err");
   } finally {
     state.busy[id] = false;
     refresh();
@@ -529,6 +541,11 @@ async function act(id, path, body, label) {
 /** Estado de la tarjeta, que tambien fija el color de acento. */
 function cardState(inst) {
   if (!inst.online) return "off";
+  // "ocupada" no es "apagada": el proceso vive y `/health` contesta, pero
+  // `/status` no, porque el hilo principal del juego esta ocupado. Suele
+  // ser una orden de Baritone a medias. Decirlo es lo que separa "reinicia
+  // esta" de "espera, que esta trabajando".
+  if (inst.busy) return "busy";
   const s = inst.status || {};
   if (s.dead) return "dead";
   return s.inWorld ? "play" : "menu";
@@ -536,14 +553,16 @@ function cardState(inst) {
 
 function statusPill(inst) {
   const st = cardState(inst);
-  const label = { off: "apagada", menu: "en menú", dead: "muerta", play: "en juego" }[st];
+  const label = {
+    off: "apagada", busy: "ocupada", menu: "en menÃº", dead: "muerta", play: "en juego",
+  }[st];
   return `<span class="pill">${label}</span>`;
 }
 
 function stat(k, v) {
   const empty = v === null || v === undefined || v === "";
   return `<div class="stat"><div class="k">${esc(k)}</div>
-    <div class="v${empty ? " empty" : ""}">${empty ? "—" : esc(v)}</div></div>`;
+    <div class="v${empty ? " empty" : ""}">${empty ? "â€”" : esc(v)}</div></div>`;
 }
 
 /** El FPS lleva una barrita: un numero suelto no dice si va bien o mal. */
@@ -560,13 +579,13 @@ function tile(k, v, tone) {
   const empty = v === null || v === undefined;
   return `<div class="tile"${tone ? ` style="--t:${tone}"` : ""}>
     <div class="k">${esc(k)}</div>
-    <div class="v${empty ? " dim" : ""}">${empty ? "—" : esc(v)}</div>
+    <div class="v${empty ? " dim" : ""}">${empty ? "â€”" : esc(v)}</div>
   </div>`;
 }
 
 function slotHtml(slot, selected) {
   if (!slot || !slot.id) {
-    return `<div class="slot" title="vacío"></div>`;
+    return `<div class="slot" title="vacÃ­o"></div>`;
   }
   // El sprite llega por `id` (`minecraft:diamond_ore`). Solo el camino importa:
   // el hub los saca del jar del cliente, y lo que no encuentre responde 404.
@@ -579,7 +598,7 @@ function slotHtml(slot, selected) {
     ? `<div class="n">${slot.damage}/${slot.maxDamage}</div>`
     : (slot.count > 1 ? `<div class="n">${slot.count}</div>` : "");
   return `<div class="slot filled${selected ? " sel" : ""}"
-    title="${esc(slot.name || slot.id)} ×${slot.count}\n${esc(slot.id)}">` +
+    title="${esc(slot.name || slot.id)} Ã—${slot.count}\n${esc(slot.id)}">` +
       (sprite ? `<img class="ico" alt="" src="${esc(sprite)}">` : "") +
       `<span class="txt">${esc(short)}</span>${dmg}</div>`;
 }
@@ -611,12 +630,12 @@ function inventoryHtml(id) {
   return `<div class="inv">${hotbar}</div>
     <div class="inv" style="margin-top:4px">${main}</div>
     <div class="armor">${armor}${off}</div>
-    <p class="hint">${inv.filled} huecos ocupados · ranura ${inv.selectedSlot + 1}</p>`;
+    <p class="hint">${inv.filled} huecos ocupados Â· ranura ${inv.selectedSlot + 1}</p>`;
 }
 
 function chatHtml(id) {
   const buf = state.chat[id] || [];
-  if (!buf.length) return `<p class="empty-note">Sin actividad todavía.</p>`;
+  if (!buf.length) return `<p class="empty-note">Sin actividad todavÃ­a.</p>`;
   return buf.map(l =>
     `<div class="${l.kind}">${esc(l.text)}</div>`
   ).join("");
@@ -635,8 +654,12 @@ function cardHtml(inst) {
 
   return `<div class="card st-${cardState(inst)}" data-id="${esc(inst.id)}">
     <div class="head">
-      <span class="dot ${inst.online ? "on" : "off"}"></span>
-      <span class="name">${esc(inst.name)}</span>
+     <span class="dot ${inst.online ? "on" : "off"}"></span>
+     <label class="pick" title="Marcar para mandarle la misma orden a varias">
+       <input type="checkbox" data-sel="${esc(inst.id)}" ${state.sel[inst.id] ? "checked" : ""}>
+     </label>
+     <span class="name">${esc(inst.name)}</span>
+
       <span class="port">:${inst.port}</span>
       <span class="spacer"></span>
       ${statusPill(inst)}
@@ -647,7 +670,7 @@ function cardHtml(inst) {
       <div class="stats">
         ${stat("Jugador", s.playerName)}
         ${stat("Mundo", s.worldName || s.serverName)}
-        ${stat("Dimensión", s.dimension)}
+        ${stat("DimensiÃ³n", s.dimension)}
         ${fpsStat(s.fps)}
         ${stat("Jugadores", s.playerCount ? `${s.playerCount}${s.maxPlayers ? " / " + s.maxPlayers : ""}` : null)}
         ${stat("Pantalla", s.screen)}
@@ -659,11 +682,11 @@ function cardHtml(inst) {
         <button class="btn primary" data-act="connect" data-id="${esc(inst.id)}" ${dis}>Conectar</button>
         <button class="btn" data-act="disconnect" data-id="${esc(inst.id)}" ${dis}>Desconectar</button>
         <button class="btn" data-act="respawn" data-id="${esc(inst.id)}" ${dis || s.dead ? "" : "disabled"}
-          title="${s.dead ? "" : "solo si el personaje está muerto"}">Reaparecer</button>
+          title="${s.dead ? "" : "solo si el personaje estÃ¡ muerto"}">Reaparecer</button>
         <button class="btn" data-act="status" data-id="${esc(inst.id)}" ${dis}>Actualizar</button>
         <button class="btn" data-act="profile" data-id="${esc(inst.id)}" ${dis}>Identidad</button>
         <button class="btn danger" data-act="stop" data-id="${esc(inst.id)}" ${dis}
-          title="el panel solo para instancias que ha arrancado él">Parar</button>
+          title="el panel solo para instancias que ha arrancado Ã©l">Parar</button>
       </div>
 
       <div class="sect">
@@ -775,13 +798,13 @@ function render() {
   const avg = fps.length ? Math.round(fps.reduce((a, b) => a + b, 0) / fps.length) : null;
   el("summary").innerHTML =
     tile("Instancias", state.instances.length, "var(--accent)") +
-    tile("En línea", on.length, "var(--ok)") +
+    tile("En lÃ­nea", on.length, "var(--ok)") +
     tile("En juego", playing.length, "var(--accent-2)") +
     tile("FPS medio", avg,
       avg === null ? null : avg >= 50 ? "var(--ok)" : avg >= 25 ? "var(--warn)" : "var(--bad)");
 
   el("hubInfo").textContent =
-    `${state.instances.length} instancia(s) · ${on.length} en línea`;
+    `${state.instances.length} instancia(s) Â· ${on.length} en lÃ­nea`;
 }
 
 // --- Datos -----------------------------------------------------------------
@@ -791,7 +814,7 @@ async function poll() {
   const res = await api("/api/instances");
   if (res.status !== 200 || !res.body || !res.body.data) {
     el("hubDot").className = "dot off";
-    el("hubInfo").textContent = "sin conexión con el hub";
+    el("hubInfo").textContent = "sin conexiÃ³n con el hub";
     return;
   }
   el("hubDot").className = "dot on";
@@ -800,7 +823,7 @@ async function poll() {
   state.instances = res.body.data.instances;
 
   for (const inst of state.instances) {
-    // Solo se pide el chat de las que están vivas y ya se habían expandido,
+    // Solo se pide el chat de las que estÃ¡n vivas y ya se habÃ­an expandido,
     // para no gastar peticiones en instancias que nadie mira.
     if (inst.online && state.expanded[inst.id]) {
       const c = await api(`/api/instances/${inst.id}/chat?limit=25`);
@@ -816,12 +839,12 @@ async function poll() {
       }
     }
     if (previous.has(inst.id) && !inst.online && previous.get(inst.id).online) {
-      log(inst.id, "· la instancia se ha apagado", "err");
+      log(inst.id, "Â· la instancia se ha apagado", "err");
     }
-    if (!previous.has(inst.id)) log(inst.id, "· instancia añadida");
+    if (!previous.has(inst.id)) log(inst.id, "Â· instancia aÃ±adida");
   }
 
-  // El inventario se pide solo si la casilla está abierta.
+  // El inventario se pide solo si la casilla estÃ¡ abierta.
   for (const inst of state.instances) {
     if (state.invOpen[inst.id] && inst.online) {
       const inv = await api(`/api/instances/${inst.id}/inventory`);
@@ -851,7 +874,7 @@ const ACTIONS = {
   mine: (id) => {
     const block = readInput(id, "block") || "diamond_ore";
     const amount = parseInt(readInput(id, "amount") || "32", 10);
-    act(id, "baritone/mine", { block, amount }, `minar ${block} ×${amount}`);
+    act(id, "baritone/mine", { block, amount }, `minar ${block} Ã—${amount}`);
   },
   bstop: (id) => act(id, "baritone/stop", {}, "parar Baritone"),
   binfo: (id) => baritoneInfo(id),
@@ -892,8 +915,8 @@ function promptConnect(id) {
   if (!portInput) return;
   const port = parseInt(portInput, 10);
   if (!Number.isInteger(port) || port < 1 || port > 65535) {
-    log(id, "✗ puerto inválido", "err");
-    toast("puerto inválido", "err");
+    log(id, "âœ— puerto invÃ¡lido", "err");
+    toast("puerto invÃ¡lido", "err");
     render();
     return;
   }
@@ -903,7 +926,7 @@ function promptConnect(id) {
 async function changeIdentity(id) {
   const res = await api(`/api/instances/${id}/profile`);
   const cur = res.status === 200 && res.body.data ? res.body.data.name : "?";
-  const name = window.prompt(`Nombre actual: ${cur}\nNuevo nombre (1-16, letras, dígitos y guion bajo)`, cur);
+  const name = window.prompt(`Nombre actual: ${cur}\nNuevo nombre (1-16, letras, dÃ­gitos y guion bajo)`, cur);
   if (!name) return;
   act(id, "profile", { name }, `identidad: ${name}`);
 }
@@ -911,7 +934,7 @@ async function changeIdentity(id) {
 async function baritoneInfo(id) {
   for (const what of ["version", "proc", "eta", "paused"]) {
     const res = await api(`/api/instances/${id}/baritone/${what}`);
-    const d = res.status === 200 && res.body.data ? JSON.stringify(res.body.data) : "—";
+    const d = res.status === 200 && res.body.data ? JSON.stringify(res.body.data) : "â€”";
     log(id, `${what}: ${d}`);
   }
   render();
@@ -919,7 +942,7 @@ async function baritoneInfo(id) {
 
 async function removeInstance(id) {
   const inst = state.instances.find(i => i.id === id);
-  if (!window.confirm(`¿Quitar «${inst.name}» del panel? (no cierra Minecraft)`)) return;
+  if (!window.confirm(`Â¿Quitar Â«${inst.name}Â» del panel? (no cierra Minecraft)`)) return;
   await api(`/api/instances/${id}`, { method: "DELETE" });
   toast(`${inst.name} quitada del panel`);
   poll();
@@ -928,7 +951,7 @@ async function removeInstance(id) {
 /** El hub solo para lo que el mismo ha arrancado, asi que se manda el puerto. */
 async function stopInstance(id) {
   const inst = state.instances.find(i => i.id === id);
-  if (!window.confirm(`¿Parar «${inst.name}»?`)) return;
+  if (!window.confirm(`Â¿Parar Â«${inst.name}Â»?`)) return;
   state.busy[id] = true;
   render();
   const res = await api("/api/stop", {
@@ -937,14 +960,14 @@ async function stopInstance(id) {
   });
   const d = res.body && res.body.data;
   if (res.status === 200 && d && d.stopped) {
-    log(id, "✓ instancia parada");
+    log(id, "âœ“ instancia parada");
     toast(`${inst.name} parada`, "ok");
   } else if (res.status === 200) {
-    log(id, "· no estaba arrancada por el panel", "err");
+    log(id, "Â· no estaba arrancada por el panel", "err");
     toast("no estaba arrancada por el panel", "err");
   } else {
     const e = res.body && res.body.error;
-    log(id, `✗ parar: ${e ? e.message : "HTTP " + res.status}`, "err");
+    log(id, `âœ— parar: ${e ? e.message : "HTTP " + res.status}`, "err");
     toast(`parar: ${e ? e.message : "HTTP " + res.status}`, "err");
   }
   state.busy[id] = false;
@@ -958,19 +981,19 @@ async function launchInstance() {
   const port = parseInt(raw, 10);
 
   el("btnLaunch").disabled = true;
-  el("launchInfo").textContent = `arrancando ${port}…`;
+  el("launchInfo").textContent = `arrancando ${port}â€¦`;
   const res = await api("/api/launch", {
     method: "POST",
     body: JSON.stringify({ port, name: `Instancia ${port}` }),
   });
 
   if (res.status === 200 && res.body.data && res.body.data.started) {
-    el("launchInfo").textContent = `✓ ${port} arrancada (pid ${res.body.data.pid})`;
+    el("launchInfo").textContent = `âœ“ ${port} arrancada (pid ${res.body.data.pid})`;
     el("newPort").value = "";
     toast(`instancia ${port} arrancada (pid ${res.body.data.pid})`, "ok");
   } else {
     const e = res.body && res.body.error;
-    el("launchInfo").textContent = `✗ ${e ? e.message : "HTTP " + res.status}`;
+    el("launchInfo").textContent = `âœ— ${e ? e.message : "HTTP " + res.status}`;
     toast(e ? e.message : "HTTP " + res.status, "err");
   }
   el("btnLaunch").disabled = false;
@@ -980,7 +1003,7 @@ async function launchInstance() {
 /** Registra las instancias que ya estaban vivas y no venian del panel. */
 async function discoverInstances() {
   el("btnDiscover").disabled = true;
-  el("btnDiscover").textContent = "Buscando…";
+  el("btnDiscover").textContent = "Buscandoâ€¦";
   const res = await api("/api/discover", { method: "POST" });
   const d = res.body && res.body.data;
   if (res.status === 200 && d) {
@@ -991,7 +1014,7 @@ async function discoverInstances() {
       ? `${d.added.length} instancia(s) nueva(s) de ${d.scanned} puertos`
       : `nada nuevo en ${d.scanned} puertos`, d.added.length ? "ok" : "");
   } else {
-    el("hubInfo").textContent = "✗ no se pudo descubrir";
+    el("hubInfo").textContent = "âœ— no se pudo descubrir";
     toast("no se pudo descubrir", "err");
   }
   el("btnDiscover").disabled = false;
@@ -999,43 +1022,230 @@ async function discoverInstances() {
   poll();
 }
 
-/** Manda la misma peticion a todas las instancias y resume el resultado. */
-async function broadcastAll() {
-  const path = el("bcPath").value.trim().replace(/^\/+/, "");
-  if (!path) return;
-  const rawBody = el("bcBody").value.trim();
+/**
+ * Las acciones que se pueden mandar a varias instancias de golpe.
+ *
+ * Antes esto era un campo para escribir la ruta y otro para el cuerpo JSON a
+ * mano, y ahi es donde se rompia: `POST /chat` con `{"text":...}` en vez de
+ * `{"message":...}`, la barra de delante, `baritone/mine` en vez de
+ * `baritone/mine`, olvidando el `#` de Baritone... Cada error de ahi sale como
+ * un 400 o un 404 de la instancia, no como "has escrito mal el formulario", y
+ * con seis instancias a la vez es imposible ver cual fallo.
+ *
+ * Asi que el catalogo es el del TUI (`scripts/tui.ts` de la rama 1.21.5): cada
+ * accion sabe su metodo, su ruta y que clave usa el cuerpo. El `arg` es lo unico
+ * que se escribe, y el cuerpo lo arma el panel.
+ *
+ * `build` devuelve `{ method, path, body }` o `null` si el argumento no vale,
+ * en cuyo caso el motivo va en `why` para poder decirlo en vez de mandar lixo.
+ */
+const ACCIONES = [
+  { id: "say", label: "Decir (chat)", method: "POST", path: "/chat",
+    ph: "el mensaje", build: a => [a, a ? null : "falta el mensaje"] },
+  { id: "cmd", label: "Comando del servidor", method: "POST", path: "/command",
+    ph: "list, o lo que sea sin /", build: a => [a.replace(/^\/+/, ""), a ? null : "falta el comando"] },
+  { id: "connect", label: "Conectar a un servidor", method: "POST", path: "/connect",
+    ph: "host:puerto", build: a => [a, a ? null : "falta host:puerto"] },
+  { id: "disconnect", label: "Desconectar", method: "POST", path: "/disconnect", ph: "",
+    build: () => [undefined, null] },
+  { id: "respawn", label: "Reaparecer", method: "POST", path: "/respawn", ph: "",
+    build: () => [undefined, null] },
+  { id: "profile", label: "Cambiar el nombre", method: "POST", path: "/profile",
+    ph: "nombre (1-16)", build: a => [a, a ? null : "falta el nombre"] },
+  { id: "baritone", label: "Baritone (orden # libre)", method: "POST", path: "/chat",
+    ph: "version, goto 0 64 0, cancelâ€¦",
+    // Baritone solo lee ordenes con prefijo # por el chat. Sin el, el mensaje
+    // sale al servidor como cualquier otro y no lo ejecuta nadie.
+    build: a => ["#" + a.replace(/^#+/, ""), a ? null : "falta la orden"] },
+  { id: "mine", label: "Baritone: minar", method: "POST", path: "/baritone/mine",
+    ph: "cantidad bloque   (ej: 16 oak_log)",
+    build: a => {
+      const p = a.split(/\s+/).filter(Boolean);
+      if (p.length !== 2) return [null, "usa Â«cantidad bloqueÂ»"];
+      if (!/^\d+$/.test(p[0]) || +p[0] < 1) return [null, "la cantidad no es un numero"];
+      return [{ block: p[1], amount: +p[0] }, null];
+    } },
+  { id: "find", label: "Baritone: buscar", method: "GET", path: "/baritone/find",
+    query: "block", ph: "bloque",
+    build: a => [a, a ? null : "falta el bloque"] },
+  { id: "bstop", label: "Baritone: parar", method: "POST", path: "/baritone/stop", ph: "",
+    build: () => [undefined, null] },
+  { id: "status", label: "Ver estado", method: "GET", path: "/status", ph: "",
+    build: () => [undefined, null] },
+  { id: "health", label: "Ver si vive (no toca el juego)", method: "GET", path: "/health", ph: "",
+    build: () => [undefined, null] },
+  { id: "players", label: "Ver jugadores", method: "GET", path: "/players", ph: "",
+    build: () => [undefined, null] },
+  { id: "history", label: "Leer chat (sin vaciar)", method: "GET", path: "/chat/history",
+    query: "limit", ph: "",
+    build: () => [15, null] },
+  { id: "screen", label: "Leer chat en pantalla", method: "GET", path: "/chat/screen",
+    query: "limit", ph: "",
+    build: () => [15, null] },
+];
 
-  let body;
-  if (rawBody) {
-    try {
-      body = JSON.parse(rawBody);
-    } catch {
-      window.alert("El cuerpo no es JSON válido.");
-      return;
+/**
+ * Cada accion contra la instancia correcta y con el metodo correcto.
+ *
+ * No es decorativo: `/baritone/find` es un GET con `?block=`, no un POST con un
+ * cuerpo, y mandarlo al reves da un 405 que parece "el bot no responde". Lo
+ * ejecuta el banco de pruebas del hub contra la instancia viva, asi que un metodo
+ * o una ruta equivocados en el catalogo se ven sin abrir el panel.
+ */
+function probaAcciones(instId) {
+  const casos = [
+    { id: "say", arg: "hola", metodo: "POST", ruta: "/puppeteer/chat", cuerpo: '"message"' },
+    { id: "cmd", arg: "list", metodo: "POST", ruta: "/puppeteer/command", cuerpo: '"command"' },
+    { id: "connect", arg: "127.0.0.1:25565", metodo: "POST", ruta: "/puppeteer/connect", cuerpo: '"address"' },
+    { id: "profile", arg: "Alex", metodo: "POST", ruta: "/puppeteer/profile", cuerpo: '"name"' },
+    { id: "baritone", arg: "version", metodo: "POST", ruta: "/puppeteer/chat", cuerpo: '#version' },
+    { id: "mine", arg: "16 diamond_ore", metodo: "POST", ruta: "/puppeteer/baritone/mine", cuerpo: '"amount":16' },
+    { id: "bstop", arg: "", metodo: "POST", ruta: "/puppeteer/baritone/stop", cuerpo: null },
+    { id: "find", arg: "diamond_ore", metodo: "GET", ruta: "/puppeteer/baritone/find?block=diamond_ore", cuerpo: null },
+    { id: "status", arg: "", metodo: "GET", ruta: "/puppeteer/status", cuerpo: null },
+    { id: "health", arg: "", metodo: "GET", ruta: "/puppeteer/health", cuerpo: null },
+    { id: "players", arg: "", metodo: "GET", ruta: "/puppeteer/players", cuerpo: null },
+    { id: "history", arg: "", metodo: "GET", ruta: "/puppeteer/chat/history?limit=15", cuerpo: null },
+    { id: "screen", arg: "", metodo: "GET", ruta: "/puppeteer/chat/screen?limit=15", cuerpo: null },
+  ];
+  return casos.map(c => {
+    const a = ACCIONES.find(x => x.id === c.id);
+    if (!a) return { id: c.id, ok: false, motivo: "no esta en el catalogo" };
+    const [valor, why] = a.build(c.arg);
+    if (why) return { id: c.id, ok: false, motivo: why };
+    const ruta = a.query ? a.path + "?" + a.query + "=" + encodeURIComponent(valor) : a.path;
+    const cuerpo = a.method === "POST" && valor !== undefined ? JSON.stringify(valor) : null;
+    const problemas = [];
+    if (a.method !== c.metodo) problemas.push(`metodo ${a.method} en vez de ${c.metodo}`);
+    if (ruta !== c.ruta) problemas.push(`ruta ${ruta} en vez de ${c.ruta}`);
+    if (c.cuerpo && !String(cuerpo).includes(c.cuerpo)) {
+      problemas.push(`el cuerpo ${cuerpo} no lleva ${c.cuerpo}`);
     }
-  } else {
-    body = {};
+    return { id: c.id, ok: problemas.length === 0, motivo: problemas.join("; ") };
+  });
+}
+
+/** Rellena el desplegable de acciones y ajusta el texto de ayuda. */
+function fillActions() {
+  const sel = el("bcAction");
+  sel.innerHTML = ACCIONES.map(a => `<option value="${esc(a.id)}">${esc(a.label)}</option>`).join("");
+  sel.addEventListener("change", sincronizaArgPlaceholder);
+  sincronizaArgPlaceholder();
+}
+
+function accionElegida() {
+  return ACCIONES.find(a => a.id === el("bcAction").value) || ACCIONES[0];
+}
+
+function sincronizaArgPlaceholder() {
+  const a = accionElegida();
+  el("bcArg").placeholder = a.ph || "(sin argumentos)";
+  el("bcArg").disabled = !a.ph;
+}
+
+/** A quien va la orden: todas, o las marcadas en sus tarjetas. */
+function destinosElegidos() {
+  if (el("bcTarget").value === "all") {
+    return state.instances.map(i => i.id);
+  }
+  return state.instances.filter(i => state.sel[i.id]).map(i => i.id);
+}
+
+/** Pinta el resultado de una instancia en su propia tarjeta. */
+function logDestino(id, texto, kind) {
+  log(id, texto, kind);
+}
+
+/**
+ * Manda la accion elegida a varias instancias y resume el resultado.
+ *
+ * A "todas" va en una sola peticion a `/api/broadcast/{ruta}`, que el hub reparte
+ * en paralelo y devuelve un resultado por instancia. A "las seleccionadas" son
+ * N peticiones al proxy, en paralelo desde aqui, porque el broadcast del hub va
+ * siempre a todas.
+ */
+async function broadcastAll() {
+  const accion = accionElegida();
+  const [valor, why] = accion.build(el("bcArg").value.trim());
+  if (why) {
+    toast(`${accion.label}: ${why}`, "err");
+    return;
+  }
+  const destinos = destinosElegidos();
+  if (!destinos.length) {
+    toast("No hay destinos: ninguna instancia esta seleccionada", "err");
+    return;
   }
 
-  el("hubInfo").textContent = "enviando a todas…";
-  const res = await api(`/api/broadcast/${path}`, {
-    method: "POST",
-    body: JSON.stringify(body),
-  });
+  const method = accion.method;
+  // Las de GET llevan su parametro en la query, no en un cuerpo: por eso
+  // `find` es `GET /baritone/find?block=diamond_ore` y no un POST con bloque.
+  const ruta = accion.query
+    ? accion.path + "?" + accion.query + "=" + encodeURIComponent(valor)
+    : accion.path;
+  // El cuerpo solo para POST, y solo si la accion trae algo que mandar:
+  // un POST vacio en `/chat` es un 400 `empty_body`.
+  const body = method === "POST" && valor !== undefined ? JSON.stringify(valor) : undefined;
+  const etiqueta = accion.label.toLowerCase();
+
+  el("hubInfo").textContent = `enviando a ${destinos.length}â€¦`;
+
+  let res;
+  if (el("bcTarget").value === "all") {
+    res = await api(`/api/broadcast${ruta}`, { method, body });
+  } else {
+    res = await apiPorInstancia(destinos, ruta, method, body);
+  }
 
   const d = res.body && res.body.data;
-  if (res.status === 200 && d) {
-    const fallos = d.results.filter(r => !r.ok);
-    const resumen = `${d.sent}/${d.total} ok` +
-      (fallos.length ? ` · fallaron: ${fallos.map(f => `${f.id}(${f.error || f.status})`).join(", ")}` : "");
+  if (res.status === 200 && d && Array.isArray(d.results)) {
+    let ok = 0;
+    for (const r of d.results) {
+      // El hub devuelve el id tal cual ("p25580"), que es la misma clave que
+      // usa state.instances: no hace falta traducirlo por el puerto.
+      const detalle = r.error ? r.error : cuerpoCorto(r.body);
+      if (r.ok) ok++;
+      logDestino(r.id, `${r.ok ? "âœ“" : "âœ—"} ${etiqueta}: ${detalle}`, r.ok ? "ok" : "err");
+    }
+    const resumen = `${ok}/${d.results.length} ok` +
+      (ok === d.results.length ? "" : ` Â· ${d.results.length - ok} con error`);
     el("hubInfo").textContent = resumen;
-    toast(resumen, fallos.length ? "err" : "ok");
+    toast(resumen, ok === d.results.length ? "ok" : "err");
   } else {
     const e = res.body && res.body.error;
-    el("hubInfo").textContent = `✗ ${e ? e.message : "HTTP " + res.status}`;
-    toast(e ? e.message : "HTTP " + res.status, "err");
+    const msg = e ? e.message : "HTTP " + res.status;
+    el("hubInfo").textContent = `âœ— ${msg}`;
+    toast(msg, "err");
   }
   poll();
+}
+
+/** N peticiones al proxy en paralelo, con la misma forma de resultado. */
+async function apiPorInstancia(ids, path, method, body) {
+  const results = await Promise.all(ids.map(async id => {
+    const res = await api(`/api/instances/${id}${path}`, { method, body });
+    const inst = state.instances.find(i => i.id === id);
+    if (res.status === 200) {
+      return { id, name: inst ? inst.name : id, ok: true, status: res.status, body: res.body && res.body.data };
+    }
+    const e = res.body && res.body.error;
+    return { id, name: inst ? inst.name : id, ok: false, status: res.status,
+             error: e ? e.code + " â€” " + e.message : "HTTP " + res.status };
+  }));
+  return { status: 200, body: { ok: true, data: { results } } };
+}
+
+/** El resultado de una instancia en una linea y sin reventar la tarjeta. */
+function cuerpoCorto(body) {
+  if (body === null || body === undefined) return "";
+  // Las instancias contestan {ok, data} o {ok:false, error:{code,message}}. De
+  // las dos cosas interesa el mensaje, no el sobre entero: "bloque desconocido"
+  // dice mucho mas que '{"ok":false,"error":{'.
+  const d = (typeof body === "object" && body !== null)
+    ? (body.error ? body.error.message : body.data)
+    : body;
+  const s = d === undefined || d === null ? "" : (typeof d === "string" ? d : JSON.stringify(d));
+  return s.length > 90 ? s.slice(0, 90) + "â€¦" : s;
 }
 
 /** Pinta el estado del launcher (si se puede arrancar, y que vive ahora). */
@@ -1047,13 +1257,13 @@ async function refreshLauncher() {
   el("btnLaunch").disabled = !d.ready;
   if (!d.ready) {
     info.textContent = "sin compilar: ejecuta ./gradlew build";
-  } else if (!info.textContent.startsWith("✓") && !info.textContent.startsWith("✗")) {
-    info.textContent = `arrancar en ${d.from}–${d.to}` +
-      (d.running.length ? ` · ${d.running.length} viva(s)` : "");
+  } else if (!info.textContent.startsWith("âœ“") && !info.textContent.startsWith("âœ—")) {
+    info.textContent = `arrancar en ${d.from}â€“${d.to}` +
+      (d.running.length ? ` Â· ${d.running.length} viva(s)` : "");
   }
   el("newPort").min = d.from;
   el("newPort").max = d.to;
-  el("newPort").placeholder = `libre (${d.from}–${d.to})`;
+  el("newPort").placeholder = `libre (${d.from}â€“${d.to})`;
 }
 
 // Delegado, no uno por input: los inputs se recrean en cada render y cualquier
@@ -1064,7 +1274,7 @@ document.addEventListener("input", (ev) => {
 });
 
 // Si un item no trae sprite, el hub responde 404 y se deja el nombre corto, que
-// es como se veía antes. `error` no burbujea, asi que va en fase de captura.
+// es como se veÃ­a antes. `error` no burbujea, asi que va en fase de captura.
 document.addEventListener("error", (ev) => {
   const img = ev.target;
   if (img.tagName !== "IMG" || !img.classList.contains("ico")) return;
@@ -1098,8 +1308,16 @@ document.addEventListener("click", (ev) => {
   if (all.dataset.all === "run") broadcastAll();
   else if (all.dataset.all === "launch") launchInstance();
 });
-el("bcBody").addEventListener("keydown", (ev) => { if (ev.key === "Enter") broadcastAll(); });
-el("bcPath").addEventListener("keydown", (ev) => { if (ev.key === "Enter") broadcastAll(); });
+// La casilla de "varias" va por `change`, no por `click`: el click en la
+// etiqueta la alterna dos veces y se queda como estaba.
+document.addEventListener("change", (ev) => {
+  const box = ev.target.closest("[data-sel]");
+  if (!box) return;
+  state.sel[box.dataset.sel] = box.checked;
+  render();
+});
+el("bcArg").addEventListener("keydown", (ev) => { if (ev.key === "Enter") broadcastAll(); });
+el("bcTarget").addEventListener("change", render);
 el("dlgCancel").addEventListener("click", () => el("dlg").close());
 el("dlgSave").addEventListener("click", async () => {
   const res = await api("/api/instances", {
@@ -1125,6 +1343,7 @@ function autoscroll() {
   for (const box of document.querySelectorAll("[data-log]")) box.scrollTop = box.scrollHeight;
 }
 
+fillActions();
 poll();
 setInterval(poll, 2000);
 setInterval(autoscroll, 1000);

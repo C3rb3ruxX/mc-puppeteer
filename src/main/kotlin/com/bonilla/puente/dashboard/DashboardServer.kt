@@ -175,12 +175,17 @@ class DashboardServer @JvmOverloads constructor(
 		val array = JsonArray()
 		probed.forEach { (instance, future) ->
 			val probe = try {
-				future.get(PROBE_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+				// El sondeo puede hacer DOS peticiones ahora: `/status` y, si esa
+				// falla, `/health` para distinguir "apagada" de "ocupada". Por eso
+				// la espera cubre las dos, o el panel veria vivas como apagadas
+				// solo por llegar tarde.
+				future.get(PROBE_TIMEOUT_MS + HEALTH_TIMEOUT_MS + 500, TimeUnit.MILLISECONDS)
 			} catch (e: Exception) {
 				ProbeResult(false, null, "sin respuesta en ${PROBE_TIMEOUT_MS}ms")
 			}
 			array.add(instance.toJson().apply {
 				addProperty("online", probe.online)
+				addProperty("busy", probe.busy)
 				if (probe.status != null) add("status", probe.status) else add("status", com.google.gson.JsonNull.INSTANCE)
 				if (probe.error != null) addProperty("error", probe.error) else add("error", com.google.gson.JsonNull.INSTANCE)
 			})
@@ -546,22 +551,84 @@ class DashboardServer @JvmOverloads constructor(
 		)
 	}
 
-	private fun probe(instance: Instance): ProbeResult = try {
+	/**
+	 * Sondea una instancia.
+	 *
+	 * `/status` entra en el hilo principal del juego, asi que cuando ese hilo esta
+	 * ocupado (por ejemplo esperando a Baritone) no responde aunque el proceso
+	 * este perfectamente vivo. Por eso, si `/status` falla, se pregunta tambien
+	 * por `/health`, que no toca ese hilo: si contesta, la instancia no esta
+	 * apagada, esta **ocupada**, que es una situacion distinta y accionable.
+	 */
+	private fun probe(instance: Instance): ProbeResult {
+		val status = probeStatus(instance)
+		if (status.online) return status
+		val viva = instance.respondeAHealth()
+		return if (viva) {
+			ProbeResult(
+				online = true,
+				status = null,
+				error = status.error,
+				busy = true,
+			)
+		} else {
+			status
+		}
+	}
+
+	private fun probeStatus(instance: Instance): ProbeResult = try {
 		val request = authorized(
 			HttpRequest.newBuilder(URI("http://${instance.host}:${instance.port}/puppeteer/status")),
 			instance,
 		).timeout(Duration.ofMillis(PROBE_TIMEOUT_MS)).GET().build()
 
 		val response = client.send(request, HttpResponse.BodyHandlers.ofString())
-		if (response.statusCode() == 200) {
-			val root = com.google.gson.JsonParser.parseString(response.body())
-			val data = root.asJsonObject.getAsJsonObject("data")
-			ProbeResult(true, data, null)
+		if (response.statusCode() != 200) {
+			// El mod contesta 503 `main_thread_timeout` cuando el hilo principal
+			// esta ocupado: no es un fallo del hub, es el dato que busca.
+			ProbeResult(false, null, motivoDelError(response.statusCode(), response.body()))
 		} else {
-			ProbeResult(false, null, "HTTP ${response.statusCode()}")
+			val root = com.google.gson.JsonParser.parseString(response.body()).asJsonObject
+			// Un 200 sin `data` no es un estado: es un sobre de error. Si se
+			// aceptara aqui, una instancia ocupada apareceria "en linea" pero sin
+			// ningun dato, que es justo lo que el estado ocupado viene a evitar.
+			if (root.get("data")?.isJsonObject == true) {
+				ProbeResult(true, root.getAsJsonObject("data"), null)
+			} else {
+				ProbeResult(false, null, motivoDelError(200, response.body()))
+			}
 		}
 	} catch (e: Exception) {
 		ProbeResult(false, null, e.message ?: e.javaClass.simpleName)
+	}
+
+	/** Saca el mensaje del sobre `{ok:false,error:{code,message}}`. */
+	private fun motivoDelError(status: Int, body: String): String {
+		val mensaje = runCatching {
+			com.google.gson.JsonParser.parseString(body).asJsonObject
+				.getAsJsonObject("error")?.get("message")?.asString
+		}.getOrNull()
+		return when {
+			!mensaje.isNullOrBlank() -> mensaje
+			status != 200 -> "HTTP $status"
+			else -> "respuesta sin datos"
+		}
+	}
+
+	/**
+	 * `/health` no entra en el hilo principal, asi que es lo unico que contesta
+	 * con el juego ocupado. Un `ConnectException` aqui significa de verdad que
+	 * no hay nadie escuchando.
+	 */
+	private fun Instance.respondeAHealth(): Boolean = try {
+		val request = HttpRequest.newBuilder(URI("http://$host:$port/puppeteer/health"))
+			.timeout(Duration.ofMillis(HEALTH_TIMEOUT_MS)).GET().build()
+		client.send(request, HttpResponse.BodyHandlers.ofString()).statusCode() in 200..299
+	} catch (e: java.net.ConnectException) {
+		false
+	} catch (e: Exception) {
+		// Si tampoco esto contesta, no se puede afirmar que este viva.
+		false
 	}
 
 	/**
@@ -724,12 +791,25 @@ class DashboardServer @JvmOverloads constructor(
 
 	private class Proxied(val status: Int, val body: ByteArray, val contentType: String)
 
-	private class ProbeResult(val online: Boolean, val status: JsonObject?, val error: String?)
+	private class ProbeResult(
+		val online: Boolean,
+		val status: JsonObject?,
+		val error: String?,
+		/** Vive pero el hilo principal del juego no responde: el "estado" sale. */
+		val busy: Boolean = false,
+	)
 
 	companion object {
 		const val DEFAULT_PORT = 25590
 		const val MAX_BODY_BYTES = 256 * 1024
 		const val PROBE_TIMEOUT_MS = 1_500L
+
+		/**
+		 * `/health` no toca el hilo principal del juego, asi que contesta aunque
+		 * este ocupado. Corto a proposito: solo se usa para decir "viva pero
+		 * ocupada", y no vale la pena alargar el sondeo del panel por ello.
+		 */
+		const val HEALTH_TIMEOUT_MS = 800L
 		const val PROXY_TIMEOUT_MS = 8_000L
 		const val DISCOVERY_TIMEOUT_MS = 400L
 

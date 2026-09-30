@@ -41,7 +41,7 @@ ataque, asi que activar CORS las desactivaria.
 Con la arquitectura actual:
 
 ```
-navegador  ──same-origin──>  hub (25590)  ──servidor a servidor──>  Puente (25580, 25581…)
+navegador  â”€â”€same-originâ”€â”€>  hub (25590)  â”€â”€servidor a servidorâ”€â”€>  Puente (25580, 25581â€¦)
 ```
 
 El navegador solo habla con el hub, y el hub habla con las instancias por red
@@ -83,11 +83,20 @@ para quien exponga Puente a otra red, pero el panel no lo usa ni lo pide.
 | `POST /api/instances` | Dar de alta `{name, host, port}`. Sin token. |
 | `DELETE /api/instances/{id}` | Quitar del panel. **No cierra Minecraft.** |
 | `POST /api/discover` | Sondea el rango de puertos y da de alta lo que encuentre. |
-| `POST /api/broadcast/{ruta}` | La misma peticion a todas las instancias, en paralelo. |
+| `* /api/broadcast/{ruta}` | La misma peticion a todas las instancias, en paralelo. |
 | `POST /api/launch` | Arranca un cliente de desarrollo en `{port}`. |
 | `POST /api/stop` | Para el cliente que **el hub** arranco en `{port}`. |
 | `GET /api/launcher` | Si se puede arrancar, el rango permitido y las que viven. |
 | `* /api/instances/{id}/{ruta}` | Proxy a `http://127.0.0.1:{port}/puppeteer/{ruta}`. |
+
+El broadcast reenvia el metodo, la ruta, la query y el cuerpo tal cual, asi que
+vale para lo que sea de la API: `POST /api/broadcast/chat` con su cuerpo,
+`GET /api/broadcast/status`, `GET /api/broadcast/chat/history?limit=15`.
+
+En `GET /api/instances`, cada instancia lleva tambien `busy`: `true` es que
+contesta a `/health` pero no a `/status`, o sea viva con el hilo principal
+ocupado (ver *Estado ocupada*, mas abajo). Sin ese dato, una instancia
+ocupada salia "apagada".
 
 El proxy acepta cualquier ruta de la API de Puente, asi que `/status`,
 `/chat`, `/command`, `/connect`, `/respawn`, `/profile`, `/baritone/mine` y el
@@ -201,9 +210,12 @@ dejaba un panel en verde y ni una pista de que hubiera pasado.
 
 Por eso el panel tiene su propio boton, que lee `GET /chat/screen?limit=N`, y lo
 rele solo despues de cada accion de Baritone. Lo que sale ahi es lo que veria
-una persona, con sus errores: `#mine acacia_block 32` responde `Error at
-argument #2: Expected ForBlockOptionalMeta` (en 1.21.5 no existe ese bloque; es
-`acacia_log`).
+una persona, con sus errores: `#mine 32 acacia_log` funciona y
+`#mine acacia_block 32` responde `Error at argument #2:
+Expected ForBlockOptionalMeta`, porque Baritone espera la cantidad antes del
+bloque y `acacia_block` tampoco es un bloque valido en 1.21.5 (el tronco es
+`acacia_log`). Los dos fallos juntos son el motivo de que el ejemplo de un fallo
+no valga para distinguir "orden mal escrita" de "bloque que no existe".
 
 No es un mixin nuevo. El modulo lee por reflexion la lista de la clase
 `ChatComponent` del vanilla, que ya existe en el juego, y por eso no se toca
@@ -222,8 +234,8 @@ No es un mixin nuevo. El modulo lee por reflexion la lista de la clase
 
 Por cada instancia, una tarjeta con:
 
-- Punto de estado y pastilla: *apagada*, *en menú*, *en juego* o *muerta*.
-- Jugador, mundo, dimensión, FPS, jugadores en el mundo y pantalla actual.
+- Punto de estado y pastilla: *apagada*, *en menÃº*, *en juego* o *muerta*.
+- Jugador, mundo, dimensiÃ³n, FPS, jugadores en el mundo y pantalla actual.
 - Conectar, desconectar, reaparecer, leer estado y cambiar la identidad.
 - Chat y comandos, con registro de lo que se ha enviado y lo que ha pasado.
 - Baritone: minar por bloque y cantidad, seguir a un jugador, parar y un
@@ -243,6 +255,42 @@ toma un color de acento segun su estado: verde en juego, ambar en el menu, rojo
 muerta, gris apagada. El FPS lleva una barrita, porque un numero suelto no dice
 si va bien o si va justo.
 
+### Acciones a varias
+
+La barra de arriba manda la misma orden a mas de una instancia, y son las acciones
+que mas fallaban. Antes eran dos campos: la ruta y el JSON del cuerpo, escritos a
+mano. Ahi un error de dedo sale como un `400` de la instancia, no como "has
+escrito mal el formulario", y con seis instancias a la vez es imposible ver cual
+fallo.
+
+Ahora hay un desplegable con el catalogo de acciones (`say`, `cmd`, `connect`,
+`disconnect`, `respawn`, `profile`, `baritone`, `mine`, `find`, `bstop`, `status`,
+`health`, `players`, `history`, `screen`), un unico campo para el argumento, y
+otro desplegable para el destino: todas, o las marcadas en la casilla de cada
+tarjeta. El cuerpo lo arma el panel, que es quien sabe que `/chat` espera
+`{"message":...}` y que Baritone solo lee ordenes con `#` delante: escribirlo a
+mano era inventarse la API en cada pulsacion.
+
+- A "todas" va en una peticion a `POST /api/broadcast/{ruta}`, que el hub reparte
+  en paralelo y devuelve un resultado por instancia. A "las seleccionadas" son
+  varias peticiones al proxy, en paralelo desde el navegador.
+- El resultado de cada una se escribe en **su** tarjeta, no solo en el aviso
+  flotante: cuando se manda a diez, la unica manera de saber cual fallo es
+  leerlas una a una.
+- La orden entra igual en las instancias con el hilo principal ocupado. Por eso
+  el reparto no las excluye, y el arreglo de Baritone va fuera del hilo
+  principal (ver `PUPPETEER_BARITONE_ASYNC` en `agents/05-api.md`).
+
+### Estado *ocupada*
+
+Una instancia viva con el hilo principal ocupado sale en ambar y marcada como
+ocupada, no apagada. `/status` entra en el hilo del juego, asi que no contesta
+cuando el juego esta ocupado (Baritone minando, por ejemplo: el mod devuelve
+`503 main_thread_timeout`), pero `/health` si, porque no toca ese hilo. Si
+`/status` falla y `/health` contesta, el proceso esta vivo y hay que esperar, no
+reiniciar. Confundir las dos cosas era la razon de que una instancia trabajando
+apareciera como apagada y se pulsara "Arrancar" encima.
+
 Refresca solo cada 2 segundos. El chat y el inventario solo se piden si la
 instancia esta en linea y la casilla esta abierta, para no gastar peticiones en
 lo que nadie esta mirando.
@@ -256,11 +304,25 @@ multijugador no es de fiar y no deberia poder inyectar HTML en el panel.
 `agents/tests/DashboardSmokeTest.java` levanta un stub que imita a Puente y el
 hub encima, y comprueba de punta a punta el proxy (metodo, cuerpo, query),
 el sondeo de estado, la persistencia, el borrado, el lanzador, los sprites de los
-items y las defensas. 35 aserciones, sin necesitar Minecraft (el jar del cliente
+items y las defensas. 40 aserciones, sin necesitar Minecraft (el jar del cliente
 si tiene que estar en el classpath, que es de donde salen los sprites).
 
-No cubre: que el hub se comporte bien con muchas instancias a la vez, ni
-ninguna prueba de navegador. El JavaScript se valida parseando el bloque
+Tres de esas son las que importan para las acciones a varias, y estan al final
+porque necesitan mas de una instancia viva montada a la vez: `[35]` el reparto
+llega a las tres vivas (y ademas reporta la apagada, sin saltarsela), `[36]` cada
+una trae su propio resultado y el resumen cuadra, y `[37]`-`[38]` la orden entra
+igual en la instancia con el hilo principal ocupado y esa instancia sale
+marcada como ocupada, no apagada. Con una sola instancia viva, todos esos fallos
+pasan el test: el error sale igual de "ok" cuando la ruta va mal montada.
+
+La `[39]` es la que mas ha valido: el desplegable de acciones del panel se
+comprueba contra las rutas de verdad de `PuenteHttpServer.kt`, leyendo del codigo
+si cada ruta acepta GET, POST o los dos. Lo pilla todo: una accion con el metodo
+al reves (`/baritone/find` es GET con `?block=`, no POST con cuerpo) o con una
+ruta que ya no existe. Antes eso se descubre cuando el bot no hace nada, y no hay
+forma de saber si fue la orden o la instancia.
+
+No cubre: ninguna prueba de navegador. El JavaScript se valida parseando el bloque
 `<script>` entero con esbuild, que detecta errores de sintaxis reales pero no lo
 ejecuta: que el panel se comporte bien al escribir en un campo, eso se ha probado
 a mano.
@@ -270,10 +332,12 @@ Lo que si se ha probado a mano, con clientes de verdad:
 - Dos instancias de 1.21.5 a la vez, las dos en linea y con el mod escuchando en
   su puerto.
 - Descubrimiento con estado real: version de Minecraft, mundo, dimension y FPS.
-- Que Baritone recibe los comandos: el log del cliente enseña
+- Que Baritone recibe los comandos: el log del cliente enseÃ±a
   `[CHAT] [Baritone] > version` y su respuesta.
 - Que `GET /chat/screen` devuelve la respuesta de Baritone, incluido su
   `Error at argument #2` al pedir un bloque inexistente en 1.21.5.
+- Que el reparto a varias llega a todas las vivas y no solo a la primera, y que
+  una instancia con el hilo principal ocupado se marca ocupada, no apagada.
 - Parar las dos y comprobar que los puertos quedan libres.
 - Que lanzar fuera de rango da `400`, y que parar algo que el hub no arranco no
   hace nada.

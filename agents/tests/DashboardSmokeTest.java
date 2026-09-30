@@ -4,6 +4,7 @@ import com.bonilla.puente.http.Json;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 
 import java.io.InputStream;
@@ -374,6 +375,135 @@ public class DashboardSmokeTest {
 			stopFree.statusCode() == 200 && !stopData.get("stopped").getAsBoolean(),
 			"data=" + stopData);
 
+		// --- A varias a la vez, y el hilo principal ocupado -------------------
+		// Lo que fallaba: mandar la misma orden a todas. Con una sola instancia
+		// viva cualquier broadcast pasa el test, porque el fallo (montar mal la
+		// ruta, no reenviar el metodo, ditchar el cuerpo) se ve igual de "ok".
+		// Hace falta mas de una viva para que se note si el reparto llega a
+		// todas o solo a la primera.
+		AtomicInteger callsLive = new AtomicInteger(0);
+		HttpServer live = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+		live.createContext("/puppeteer", exchange -> {
+			String path = exchange.getRequestURI().getPath();
+			if (!path.endsWith("/status")) callsLive.incrementAndGet();
+			reply(exchange, "{\"ok\":true,\"data\":{\"echo\":\"" + path + "\"}}");
+		});
+		live.start();
+
+		// Esta segunda instancia esta OCUPADA: `/health` contesta (el proceso
+		// vive) pero `/status` responde 503 `main_thread_timeout` (el hilo
+		// principal del juego esta en otra cosa). Es el caso que sale al minar
+		// con Baritone, y el codigo sale de `MainThreadBridge` de verdad.
+		AtomicInteger callsBusy = new AtomicInteger(0);
+		AtomicReference<String> busyPath = new AtomicReference<>("(nunca)");
+		HttpServer busy = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+		busy.createContext("/puppeteer", exchange -> {
+			String path = exchange.getRequestURI().getPath();
+			if (path.endsWith("/status")) {
+				reply(exchange, 503, "{\"ok\":false,\"error\":{\"code\":\"main_thread_timeout\","
+					+ "\"message\":\"El hilo principal de Minecraft no respondio en 2500ms\"}}");
+				return;
+			}
+			callsBusy.incrementAndGet();
+			busyPath.set(path);
+			reply(exchange, "{\"ok\":true,\"data\":{\"echo\":\"" + path + "\"}}");
+		});
+		busy.start();
+		int busyPort = busy.getAddress().getPort();
+
+		try {
+			post(http, base2 + "/api/instances", "{\"name\":\"A\",\"port\":" + stubPort + "}");
+			post(http, base2 + "/api/instances", "{\"name\":\"B\",\"port\":" + live.getAddress().getPort() + "}");
+			post(http, base2 + "/api/instances", "{\"name\":\"C\",\"port\":" + busyPort + "}");
+
+			// El reparto tiene que llegar a las TRES vivas, no solo a la primera.
+			// La cuarta (la que esta apagada) tiene que aparecer tambien, con su
+			// fallo: si una instancia apagada se salta del reparto sin decirlo,
+			// el panel dira "3/3 ok" y no habra hecho nada en esa.
+			callsLive.set(0);
+			callsBusy.set(0);
+			stubPath.set("(nunca)");
+			JsonObject aTodas = JsonParser.parseString(
+				post(http, base2 + "/api/broadcast/chat", "{\"message\":\"hola a todas\"}").body())
+				.getAsJsonObject().getAsJsonObject("data");
+			JsonArray resTodas = aTodas.getAsJsonArray("results");
+
+			check("[35] el broadcast llega a las tres vivas y ademas reporta la apagada",
+				resTodas.size() == 4
+					&& stubPath.get().equals("/puppeteer/chat")
+					&& callsLive.get() == 1 && callsBusy.get() == 1,
+				"results=" + resTodas.size()
+					+ " stub=" + stubPath.get() + " viva=" + callsLive.get()
+					+ " ocupada=" + callsBusy.get());
+
+			check("[36] cada instancia trae su propio resultado y el resumen cuadra",
+				aTodas.get("total").getAsInt() == 4
+					&& aTodas.get("sent").getAsInt() + aTodas.get("failed").getAsInt() == 4
+					&& resTodas.get(0).getAsJsonObject().has("id")
+					&& resTodas.get(0).getAsJsonObject().has("ok"),
+				"total=" + aTodas.get("total") + " sent=" + aTodas.get("sent")
+					+ " failed=" + aTodas.get("failed"));
+
+			// A la ocupada: la orden entra igual, porque va por el puerto y el
+			// hilo principal no se mira. Por eso el arreglo de Baritone va fuera
+			// del hilo principal y no en "no mandar a las ocupadas".
+			check("[37] la orden tambien entra en la instancia con el hilo ocupado",
+				busyPath.get().equals("/puppeteer/chat"),
+				"ruta que llego=" + busyPath.get());
+
+			// Y ahora el estado: viva y ocupada no es lo mismo que apagada.
+			JsonArray todas = JsonParser.parseString(get(http, base2 + "/api/instances").body())
+				.getAsJsonObject().getAsJsonObject("data").getAsJsonArray("instances");
+			JsonObject b = null;
+			for (int i = 0; i < todas.size(); i++) {
+				JsonObject inst = todas.get(i).getAsJsonObject();
+				if (inst.get("port").getAsInt() == busyPort) b = inst;
+			}
+			check("[38] una instancia con el hilo principal ocupado sale viva pero ocupada",
+				b != null && b.get("online").getAsBoolean() && b.get("busy").getAsBoolean(),
+				"instancia=" + b);
+		} finally {
+			busy.stop(0);
+			live.stop(0);
+		}
+
+		// --- El catalogo del panel contra las rutas de verdad ----------------
+		// El desplegable de acciones del panel dice que metodo y que ruta usa
+		// cada accion. Si se equivoca en una, el bot contesta 405 o 404 y desde
+		// el panel parece que la instancia no responde. `/baritone/find` fue
+		// justo ese caso: es GET con `?block=`, y estaba como POST con cuerpo.
+		//
+		// Se comprueba contra el codigo del mod, que es la otra fuente de
+		// verdad: si una ruta se renombra ahi, este banco falla aqui y no
+		// semanas despues con seis bots que no hacen nada.
+		String panel = Files.readString(Path.of("src/main/resources/puente-dashboard/index.html"));
+		String mod = Files.readString(Path.of("src/main/kotlin/com/bonilla/puente/PuenteHttpServer.kt"));
+
+		java.util.regex.Matcher acciones = java.util.regex.Pattern.compile(
+			"\\{ id: \"(\\w+)\"[^}]*?method: \"(\\w+)\"[^}]*?path: \"([^\"]+)\"").matcher(panel);
+		int revisadas = 0;
+		StringBuilder desacuerdos = new StringBuilder();
+		while (acciones.find()) {
+			String id = acciones.group(1);
+			String metodo = acciones.group(2);
+			String ruta = acciones.group(3);
+			int q = ruta.indexOf('?');
+			String limpia = q < 0 ? ruta : ruta.substring(0, q);
+			revisadas++;
+			String deVerdad = metodoDe(mod, limpia);
+			if (deVerdad.equals("NO EXISTE")) {
+				desacuerdos.append(id).append(" -> ").append(limpia).append(": no existe en el mod; ");
+			} else if (!deVerdad.isEmpty() && !deVerdad.contains(metodo)) {
+				// Vacio es "el mod no restringe el metodo" (como `/health`): no
+				// hay con que discrepar, asi que no cuenta como fallo.
+				desacuerdos.append(id).append(" -> ").append(limpia)
+					.append(": el panel usa ").append(metodo).append(", el mod ").append(deVerdad).append("; ");
+			}
+		}
+		check("[39] el catalogo de acciones del panel coincide con las rutas del mod",
+			revisadas >= 10 && desacuerdos.length() == 0,
+			"revisadas=" + revisadas + " fallos=" + desacuerdos);
+
 	} finally {
 
 			hub.stop();
@@ -391,6 +521,75 @@ public class DashboardSmokeTest {
 	}
 
 	// --- Ayudas -------------------------------------------------------------
+
+	/** Responde con un JSON y cierra, para no repetirlo stub a stub. */
+	private static void reply(HttpExchange exchange, String json) {
+		reply(exchange, 200, json);
+	}
+
+	/**
+	 * Que metodo acepta de verdad el mod para esa ruta, leido de su codigo.
+	 *
+	 * Devuelve "NO EXISTE" si la ruta no esta, y "" si esta pero el metodo no se
+	 * puede deducir (para que el fallo diga cual de las dos cosas paso).
+	 *
+	 * El mod declara el metodo de tres formas distintas y hay que mirar las
+	 * tres: `requireMethod(exchange, "GET")`, los ayudantes
+	 * `getBaritone`/`postBaritone`, y el `when (exchange.requestMethod)` de
+	 * `/chat`. Por eso no vale un unico grep.
+	 */
+	private static String metodoDe(String fuente, String ruta) {
+		java.util.regex.Matcher m = java.util.regex.Pattern
+			.compile("\"" + java.util.regex.Pattern.quote(ruta) + "\"\\s*(->|==\\s*\"|\\s*\\))")
+			.matcher(fuente);
+		if (!m.find()) return "NO EXISTE";
+
+		// El bloque de la ruta va hasta la siguiente ruta, y ahi se decide el
+		// metodo. 600 caracteres dan de sobra para un brazo del `when`.
+		int fin = Math.min(fuente.length(), m.end() + 600);
+		String bloque = fuente.substring(m.end(), fin);
+		int siguiente = bloque.indexOf("\"/");
+		if (siguiente >= 0) bloque = bloque.substring(0, siguiente);
+
+		java.util.List<String> metodos = new java.util.ArrayList<>();
+		// `requireMethod(exchange, "GET", "POST")`: admite coma y espacio.
+		java.util.regex.Matcher req = java.util.regex.Pattern
+			.compile("requireMethod\\(exchange((?:, ?\"[A-Z]+\")+)\\)").matcher(bloque);
+		if (req.find()) {
+			java.util.regex.Matcher uno = java.util.regex.Pattern
+				.compile("\"([A-Z]+)\"").matcher(req.group(1));
+			while (uno.find()) metodos.add(uno.group(1));
+		}
+		// `when (exchange.requestMethod) { "GET" -> ...; "POST" -> ... }`: se
+		// busca el `when` una vez y luego todos los brazos. Con `(?s)` porque
+		// cada brazo va en su linea. Si se exigiera el `when` delante de cada
+		// metodo, el segundo brazo no se encontraria nunca.
+		if (bloque.contains("exchange.requestMethod")) {
+			int cola = bloque.indexOf("exchange.requestMethod");
+			java.util.regex.Matcher brazo = java.util.regex.Pattern
+				.compile("\"([A-Z]+)\"\\s*->").matcher(bloque.substring(cola));
+			while (brazo.find()) metodos.add(brazo.group(1));
+		}
+		if (bloque.contains("getBaritone(")) metodos.add("GET");
+		if (bloque.contains("postBaritone(")) metodos.add("POST");
+		if (metodos.isEmpty()) return "";
+
+		java.util.List<String> unicos = new java.util.ArrayList<>();
+		for (String x : metodos) if (!unicos.contains(x)) unicos.add(x);
+		return String.join("/", unicos);
+	}
+
+	private static void reply(HttpExchange exchange, int status, String json) {
+		try {
+			byte[] bytes = json.getBytes(StandardCharsets.UTF_8);
+			exchange.getResponseHeaders().add("Content-Type", "application/json; charset=utf-8");
+			exchange.sendResponseHeaders(status, bytes.length);
+			exchange.getResponseBody().write(bytes);
+			exchange.close();
+		} catch (Exception e) {
+			exchange.close();
+		}
+	}
 
 	private static HttpResponse<String> get(HttpClient http, String url) throws Exception {
 		return http.send(HttpRequest.newBuilder(URI.create(url)).GET().build(),
