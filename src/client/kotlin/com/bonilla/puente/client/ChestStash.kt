@@ -299,7 +299,7 @@ object ChestStash {
 			return
 		}
 
-		val ranura = ranuraDelCofreEnLaBarra(player) ?: return fallar(t, motivoSinCofre(player))
+		val ranura = ranuraDelCofreEnLaBarra(player, gameMode) ?: return fallar(t, motivoSinCofre(player))
 		val sitio = elegirSitio(level, player, t.destino) ?: return fallar(t, motivoSinSitio(t.destino))
 
 		// Un intento cada [CADA_CUANTOS_TICKS_INTENTO]: cada `useItemOn` es un
@@ -574,16 +574,47 @@ object ChestStash {
 		level.isLoaded(pos) && level.getBlockState(pos).block == Blocks.CHEST
 
 	/**
-	 * Ranura de la barra rapida (0..8) donde hay un cofre, o `null`.
+	 * Ranura de la barra rapida (0..8) donde hay un cofre, o `null` si no la hay.
 	 *
-	 * Solo la barra rapida: es la unica que el jugador puede usar sin abrir el
-	 * inventario a mano, y por eso el clic tiene que llevar el cofre ya
-	 * seleccionado.
+	 * Solo la barra rapida sirve: en vanilla un cofre se coloca con la ranura
+	 * **seleccionada**, asi que uno que este en la mochila no se puede usar. En
+	 * vez de rendirse, se cambia a la primera ranura libre de la barra con un
+	 * unico clic (`ClickType.SWAP`) en el menu del jugador, que es lo mismo que
+	 * pulsar la tecla de la barra con el raton encima del cofre.
 	 */
-	private fun ranuraDelCofreEnLaBarra(player: LocalPlayer): Int? {
+	private fun ranuraDelCofreEnLaBarra(
+		player: LocalPlayer,
+		gameMode: MultiPlayerGameMode,
+	): Int? {
 		for (i in 0 until HOTBAR_SIZE) {
 			val stack = player.inventory.getItem(i)
 			if (!stack.isEmpty && stack.item == Items.CHEST) return i
+		}
+
+		val origen = ranuraDelCofreEnLaMochila(player) ?: return null
+		// Sin sitio en la barra no hay nada que hacer: cambiar un objeto que el
+		// bot lleva en la mano por el cofre seria vaciarle la mano sin avisar.
+		val destino = primerHuecoEnLaBarra(player) ?: return null
+
+		// El indice del menu no es el de la ranura: el menu del jugador mete
+		// primero los 5 de la fabricacion y luego la armadura y la mano
+		// secundaria, asi que se pregunta con `findSlot`, que es la que usa el
+		// juego por dentro (compara `container` y `getContainerSlot`).
+		val menu = player.containerMenu
+		val ranuraMenu = menu.findSlot(player.inventory, origen).orElse(-1)
+		if (ranuraMenu < 0) return null
+		gameMode.handleInventoryMouseClick(menu.containerId, ranuraMenu, destino, ClickType.SWAP, player)
+
+		// El clic se aplica en el cliente antes de que conteste el servidor, asi
+		// que normalmente el cofre ya esta en su sitio. Si el servidor lo
+		// rechaza, aqui se devuelve `null` y el siguiente tick se reintenta.
+		return if (player.inventory.getItem(destino).item == Items.CHEST) destino else null
+	}
+
+	/** Ranura de la mochila (9..35) donde hay un cofre, o `null`. */
+	private fun ranuraDelCofreEnLaMochila(player: LocalPlayer): Int? {
+		for (i in HOTBAR_SIZE until MENU_INVENTARIO) {
+			if (player.inventory.getItem(i).item == Items.CHEST) return i
 		}
 		return null
 	}
@@ -595,15 +626,23 @@ object ChestStash {
 		return null
 	}
 
-	/** Motivo del fallo cuando no hay cofre: donde esta, si aparece en otro sitio. */
+	/**
+	 * Motivo del fallo cuando no hay un cofre Usable en la barra rapida.
+	 *
+	 * A estas alturas el cofre ya deberia haberse cambiado de sitio solo, asi que
+	 * esto es o que no lleva ninguno o que la barra esta llena y no cabe.
+	 */
 	private fun motivoSinCofre(player: LocalPlayer): String {
-		for (i in HOTBAR_SIZE until player.inventory.containerSize) {
-			if (player.inventory.getItem(i).item == Items.CHEST) {
-				return "el unico cofre esta en la ranura $i del inventario, y de ahi no se puede usar: " +
-					"tiene que estar en la barra rapida (0..8)"
-			}
+		val mochila = ranuraDelCofreEnLaMochila(player)
+		return if (mochila == null) {
+			"no lleva ningun cofre en el inventario: no se puede colocar uno"
+		} else if (primerHuecoEnLaBarra(player) == null) {
+			"el cofre esta en la ranura $mochila del inventario y la barra rapida esta llena: " +
+				"no hay sitio para pasarlo"
+		} else {
+			"el cofre de la ranura $mochila no se ha podido pasar a la barra rapida: " +
+				"el servidor no ha aceptado el cambio"
 		}
-		return "no lleva ningun cofre en el inventario: no se puede colocar uno"
 	}
 
 	private fun motivoSinSitio(destino: BlockPos): String =
