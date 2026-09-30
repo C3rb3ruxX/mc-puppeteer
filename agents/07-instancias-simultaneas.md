@@ -116,34 +116,73 @@ alguien arranco los clientes a mano).
 bun   scripts/tui.ts          # o: node scripts/tui.ts
 ```
 
-Muestra una tabla con el estado de cada instancia y una linea de ordenes. Sin
-dependencias: solo `node:fs`, `node:path`, `node:process`, `node:url` y `fetch`.
-No usa `readline`: lee el teclado byte a byte (`setRawMode` + eventos `data`),
-que es lo unico que funciona igual en Bun y en Node.
+Muestra el estado de cada instancia y una linea de ordenes. Sin dependencias:
+solo `node:fs`, `node:path`, `node:process`, `node:url` y `fetch`. No usa
+`readline`: lee el teclado byte a byte (`setRawMode` + eventos `data`), que es
+lo unico que funciona igual en Bun y en Node.
+
+El panel tiene tres zonas:
 
 ```
-mc-puppeteer  3 instancia(s), 3 viva(s)  cada 2s  23:52:02
-──────────────────────────────────────────────────────────────────────────────
-inst    puerto estado              mundo         dim    jug    fps  ms
-● 1. mc1  25580                      -             -      0/?    -    3002
-● 2. mc2  25581  127.0.0.1           -             overwo…0/0    1    639
-● 3. mc3  25582  127.0.0.1           -             overwo…2/0    1    640
+mc-puppeteer · 3 instancia(s), 3 viva(s) · cada 2s · 23:52:02
+┌ instancias                               ┬ inventario · mc1                    ┐
+│     inst  puerto estado mundo dim jug    │   7 tipo(s), 343 unidad(es)        │
+│ > ● mc1   25580  srv1   mundo sobre 1/20 │   126   Tronco de roble  ████████   │
+│   ● mc2   25581  srv2   mundo sobre 2/20 │    95   Adoquín          ██████░░   │
+│   ● mc3   25582  srv3   mundo sobre 3/20 │    63   Antorcha         ████░░░░░   │
+│     vida        comida     pos   fps  ms │    40   Tierra           ███░░░░░░░   │
+└──────────────────────────────────────────┴─────────────────────────────────────┘
 ──────────────────────────────────────────────────────────────────────────────
   mc3    <mc2> prueba final
   mc2    <mc3> prueba final
 > @1,3 cmd list
 ──────────────────────────────────────────────────────────────────────────────
-> 
-/say /cmd /baritone /connect /disconnect /respawn /profile /history /log /every /scan /token /sel /quit · @1,3 · 1-9 · Q
+>
+/say /cmd /baritone /disperse /items /focus /every /scan /sel /quit · @1,3 · 1-9 · Q
 ```
 
+- **Izquierda**: una fila por instancia. Las columnas se eligen segun el ancho
+  que queda: primero lo basico (instancia, puerto, estado, mundo, dimension,
+  jugadores) y despues, si sobra, vida, comida y posicion; fps y latencia son lo
+  ultimo que entra y lo primero que se cae. Con una terminal demasiado estrecha
+  el inventario desaparece y la tabla se queda con todo el ancho.
+- El `>` de la izquierda marca el **foco**: la instancia cuyo inventario se mira
+  al lado. Se cambia con `focus <n|nombre>` o con la tecla `f`.
+- **Derecha**: que lleva el bot del foco, de mas a menos, con la cantidad a la
+  izquierda, el nombre y una barra escalada al item mas numeroso. Sale de
+  `GET /inventory`, que se pide solo para la instancia del foco: son hasta 41
+  ranuras y no hace falta traerlas de todas en cada refresco.
+- Abajo: el `feed`, con el chat de todas mezclado y las respuestas a las ordenes.
+  Se lee de `/chat/history` **sin vaciar los buffers** del mod: se recuerda la
+  marca de tiempo del ultimo mensaje y solo se pinta lo posterior. Al abrir el
+  panel no se vuelca el historial anterior. Flechas y `RePag`/`AvPag` lo recorren.
 - Verde: responde. **Amarillo**: vive pero el estado no ha llegado (el hilo
   principal del juego esta ocupado; se comprueba con `/health`, que no lo toca).
   **Rojo**: no responde.
-- El `feed` es el chat de todas las instancias mezclado. Se lee de
-  `/chat/history` **sin vaciar los buffers** del mod: se remember la marca de
-  tiempo del ultimo mensaje y solo se pinta lo posterior. Al abrir el panel no
-  se vuelca el historial anterior.
+
+### Como esta partido el codigo
+
+`scripts/tui.ts` es solo el arranque (argumentos, bucle de refresco, apagado).
+Todo lo demas esta en `scripts/tui/`, para editar una cosa sin releer 1600 lineas:
+
+| Modulo | Que hace |
+|---|---|
+| `ansi.ts` | colores, ancho **visible** (los codigos de color no ocupan columnas) y barras |
+| `types.ts` | los tipos compartidos |
+| `state.ts` | estado, feed y ganchos hacia el arranque |
+| `api.ts` | llamadas HTTP al mod, con tiempo limite |
+| `targets.ts` | descubrimiento de instancias y destinos (`@1,3`) |
+| `poll.ts` | lo que se pregunta en cada refresco (`/status`, chat, inventario) |
+| `table.ts` | panel izquierdo: que columnas hay, cuanto ocupa cada una y las filas |
+| `inventory.ts` | panel derecho: suma por tipo de item y las dibuja |
+| `view.ts` | el compositor: reparte el ancho, monta las tres zonas y pinta |
+| `commands.ts` | las ordenes y el `/help` |
+| `panel.ts` | lo que pasa al escribir o al pulsar una tecla |
+
+Para cambiar el aspecto del panel basta con tocar dos sitios: las constantes de
+`view.ts` (`LEFT_MIN`, `RIGHT_MIN`, `LEFT_SHARE`: como se reparte el ancho) y la
+tabla `COLUMNS` de `table.ts` (que columnas hay y cuanto ocupa cada una, con su
+umbral minimo en `NEEDS_GAUGES` / `NEEDS_POS` / `NEEDS_LATENCY`).
 
 ### Mandar la misma orden a varias
 
@@ -157,22 +196,79 @@ inst    puerto estado              mundo         dim    jug    fps  ms
 | `@all ...` | todas, seleccionadas o no |
 
 Ordenes: `say`/`chat`, `cmd`, `connect`, `disconnect`, `respawn`, `profile`,
-`status`, `health`, `players`, `history [n]`, `baritone`, mas las del panel:
-`every <seg>`, `scan`, `token <t>`, `sel <n|all|none>`, `log <n> [mcN]`,
-`target`, `clear`, `help`, `quit`. Con `/` delante o tal cual.
+`status`, `health`, `players`, `items`, `history [n]`, `baritone`, `disperse`,
+mas las del panel: `every <seg>`, `scan`, `token <t>`, `sel <n|all|none>`,
+`log <n> [mcN]`, `focus <n|nombre>`, `target`, `clear`, `help`, `quit`. Con `/`
+delante o tal cual.
 
 `baritone` usa el endpoint propio (`GET /baritone/version`, `/proc`, `/eta`,
 `/modified`, `/paused`, `/wp`, `/gc`) y para todo lo demando manda la orden por
 chat con `#`, que es como Baritone la espera y asi admite argumentos libres
 (`#goto 100 64 200`).
 
+### `items` y `focus`
+
+`items` tira el inventario de **todas** las seleccionadas al feed, agrupado por
+tipo de item y de mas a menos:
+
+```
+> items
+  mc1    7 tipo(s), 343 unidad(es)
+    Tronco de roble          ████████████████   126
+    Adoquín                  ████████████░░░░    95
+    Tierra                   █████░░░░░░░░░░░    40
+```
+
+Los nombres son los que trae el juego ya traducidos (`stack.hoverName.string`), no
+el id. Si el mod no expone `/inventory`, el panel lo dice en vez de fallar en
+silencio: sale `sin inventario` con el motivo debajo en el panel de la derecha.
+
+`focus <n|nombre>` elige que instancia mira el panel de la derecha; `focus next`
+rota y `focus first` vuelve a la primera. La tecla `f` hace lo mismo que
+`focus next`. El inventario del foco se refresca solo en cada ciclo, asi que no
+hay que pedirlo a mano.
+
+### `disperse <x> <y> <z> <radio>`
+
+Reparte las instancias seleccionadas dentro de un radio de bloques alrededor de
+un punto, mandando a cada una un `#goto` a su sitio. Es un `baritone goto` por
+instancia, con el reparto calculado aqui:
+
+```
+@1,2,3 disperse 0 64 0 30
+  mc1    ok   {"sent":"#goto 0 64 0"}
+  mc2    ok   {"sent":"#goto -16 64 14"}
+  mc3    ok   {"sent":"#goto 3 64 -30"}
+disperse -> 3 instancia(s) en 30 bloques alrededor de 0 64 0
+```
+
+- El reparto es una **espiral de angulo aureo** dentro del disco: la primera
+  instancia cae en el centro exacto y las demas se van separando hasta el radio.
+  Es determinista, asi que la misma orden lleva siempre a las mismas instancias
+  al mismo sitio (al azar se amontonan).
+- Todas van a la altura `y` que se pasa; el radio se aplica en el plano XZ.
+- Van al endpoint propio `POST /baritone/goto` (que valida las coordenadas), no
+  por `/chat`.
+- Antes de mandar nada comprueba que los cuatro valores son enteros, que el radio
+  no es negativo, que la altura esta entre -64 y 320 y que centro mas radio no se
+  sale del mundo (30 000 000), que son los mismos limites que impone el mod. Si
+  algo falla, avisa y no manda nada.
+- Funciona con el prefijo de destino como cualquier otra orden: sin prefijo, a las
+  seleccionadas; `@all`, a todas.
+
 ### Teclas
 
 Con la linea **vacia**: `1`-`9` seleccionan, `a` todas, `n` ninguna,
-`r` refresca, `l` ultimas lineas del log, `Q` sale. `Ctrl-C` o `Esc` salen
-siempre. Flechas y `RePag`/`AvPag` recorren el feed. Escribiendo texto, todas
-las teclas van al texto (por eso `q` no sale: `Q` si, para poder mandar
-`quieto` por chat).
+`r` refresca, `l` ultimas lineas del log, `f` cambia el foco del inventario,
+`Q` sale. `Ctrl-C` o `Esc` salen siempre. Flechas y `RePag`/`AvPag` recorren el
+feed. Escribiendo texto, todas las teclas van al texto (por eso `q` no sale:
+`Q` si, para poder mandar `quieto` por chat).
+
+Un detalle que no es evidente: los atajos de una tecla **solo** funcionan con la
+linea vacia. Si no, estarian pisando el texto que se esta escribiendo, y `n` o
+`a` son justo las teclas que se usan al escribir. Por lo mismo, `r` y `f` no se
+pueden mandar como atajo y hay que escribirlos (`/refresh` no existe: `r` a secas
+con la linea vacia, o `baritone r` si lo que se quiere es lo otro).
 
 ### Modo script
 
