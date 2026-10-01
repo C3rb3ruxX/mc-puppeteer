@@ -12,6 +12,7 @@
 
 import { c, paint } from './ansi.ts'
 import { call, trimBody } from './api.ts'
+import { chestDe, listarChests, type Coord } from './chests.ts'
 import { push, warnLine } from './state.ts'
 import type { Reply, Target } from './types.ts'
 
@@ -53,14 +54,48 @@ const describe = (data: StoreState): string => {
 	}
 }
 
-/** `x y z` del cofre, o `null` si no se han dado. */
-const parseTarget = (args: string): { x: number; y: number; z: number } | null | 'invalido' => {
-	const parts = args.trim().split(/\s+/)
-	if (parts.length === 0) return null
-	if (parts.length !== 3) return 'invalido'
-	const [x, y, z] = parts.map(Number)
-	if (![x, y, z].every(Number.isInteger)) return 'invalido'
-	return { x: x!, y: y!, z: z! }
+/** El uso, que sale cuando no se entiende lo que se ha escrito. */
+const USO = 'uso -> store [x y z | <nombre>]   (sin nada, el cofre de la config de cada instancia)'
+
+/**
+ * A donde va el cofre, ya en coordenadas.
+ *
+ * Tres cosas se pueden escribir: tres numeros, un nombre guardado con `chest`
+ * (`store cofre`), o nada. Lo de `nombrado` es para no repetir en el feed unas
+ * coordenadas que se acaban de ver escribir, y avisar si en cambio ha habido
+ * que mirar un nombre.
+ */
+type Destino =
+	| { ok: true; xyz: Coord | null; de: string; nombrado: boolean }
+	| { ok: false; motivo: string }
+
+const parseTarget = (args: string): Destino => {
+	const partes = args.trim().split(/\s+/).filter(Boolean)
+	// Sin destino: cada bot usa el cofre de su propia config, y el mod lo
+	// resuelve. Aqui no hay nada que traducir.
+	if (partes.length === 0) {
+		return { ok: true, xyz: null, de: 'cofre de la config de cada instancia', nombrado: true }
+	}
+	// Un solo token: casi siempre un nombre, porque `x y z` son tres.
+	if (partes.length === 1) {
+		const nombre = partes[0]!
+		const xyz = chestDe(nombre)
+		if (xyz) return { ok: true, xyz, de: `'${nombre}' = ${xyz.x} ${xyz.y} ${xyz.z}`, nombrado: true }
+		const nombres = listarChests()
+			.map(([n]) => n)
+			.join(', ')
+		return {
+			ok: false,
+			motivo: nombres
+				? `no hay ningun cofre con el nombre '${nombre}' (los guardados: ${nombres})`
+				: `no hay ningun cofre con el nombre '${nombre}' y aun no hay ninguno guardado ` +
+					`(chest <nombre> <x y z>)`,
+		}
+	}
+	if (partes.length !== 3) return { ok: false, motivo: USO }
+	const [x, y, z] = partes.map(Number)
+	if (![x, y, z].every(Number.isInteger)) return { ok: false, motivo: USO }
+	return { ok: true, xyz: { x: x!, y: y!, z: z! }, de: `${x} ${y} ${z}`, nombrado: false }
 }
 
 /**
@@ -129,15 +164,18 @@ export const store = async (args: string, targets: Target[]): Promise<number> =>
 		warnLine('store: no hay instancias seleccionadas')
 		return 1
 	}
-	const target = parseTarget(args)
-	if (target === 'invalido') {
-		warnLine('store: uso -> store [x y z]   (sin coordenadas, usa el cofre de la config)')
+	const destino = parseTarget(args)
+	if (!destino.ok) {
+		warnLine(`store: ${destino.motivo}`)
 		return 1
 	}
+	// Solo si no se han escrito las coordenadas: escribirlas aqui seria repetir
+	// la linea de arriba, pero de donde salen (un nombre, la config) no se ve.
+	if (destino.nombrado) push(`store: ${destino.de}`)
 	let failures = 0
 	// En paralelo: cada bot va a lo suyo y no espera a los demas.
 	const results = await Promise.all(
-		targets.map(async t => [t, await start(t, '/store', target ?? {}, 150_000)] as const),
+		targets.map(async t => [t, await start(t, '/store', destino.xyz ?? {}, 150_000)] as const),
 	)
 	for (const [, code] of results) failures += code
 	return failures

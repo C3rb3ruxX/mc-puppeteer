@@ -59,6 +59,10 @@ const parseArgs = (argv: string[]): Options => {
 				options.registry = need(i, arg)
 				i++
 				break
+			case '--chests':
+				options.chests = need(i, arg)
+				i++
+				break
 			case '--scan-from':
 				options.scanFrom = Number(need(i, arg))
 				i++

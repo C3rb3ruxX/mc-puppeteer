@@ -8,6 +8,7 @@
 
 import { bar, c, paint, pad } from './ansi.ts'
 import { broadcast, call, trimBody } from './api.ts'
+import { chestDe, listarChests, nombreValido, ponerChest, quitarChest, rutaChests } from './chests.ts'
 import { groupItems } from './inventory.ts'
 import { push, state, warnLine } from './state.ts'
 import { store, storeNow } from './store.ts'
@@ -147,7 +148,7 @@ const items = async (_args: string, targets: Target[]): Promise<number> => {
 }
 
 /**
- * Elige que instancia se mira en el panel de la derecha.
+ * Elige que instancia se mira en el panel de inventario.
  *
  * Sin foco se ve la suma de todas, que es lo normal. `focus` estrecha la vista a
  * una sola, y `focus all` (o `next` dando la vuelta entera) vuelve a la global.
@@ -190,6 +191,81 @@ const focus = (args: string): void => {
 	)
 }
 
+/**
+ * `chest [list | <nombre> | <nombre> x y z | <nombre> rm]`: los cofres con
+ * nombre que luego acepta `store`.
+ *
+ * Vive en el panel y no en el mod a proposito: un nombre es un atajo de quien
+ * escribe la orden, no parte del bot. Para el mod `store cofre` es exactamente
+ * `store 10 -60 4`, y `store` a secas sigue siendo el cofre de la config.
+ */
+const cofres = (args: string): void => {
+	const partes = args.trim().split(/\s+/).filter(Boolean)
+	const primero = partes[0] ?? ''
+
+	if (primero === '' || primero === 'list') {
+		const lista = listarChests()
+		if (lista.length === 0) {
+			push(`sin cofres con nombre. Se anaden con  chest <nombre> <x y z>   (${rutaChests()})`)
+			return
+		}
+		push(`cofres con nombre, para  store <nombre>  (${rutaChests()}):`)
+		// La columna se ajusta al nombre mas largo: con un ancho fijo, uno de 20
+		// caracteres empuja a las coordenadas de los demas y la lista deja de
+		// leerse en columna.
+		const ancho = Math.max(...lista.map(([nombre]) => nombre.length)) + 2
+		for (const [nombre, xyz] of lista) {
+			push(`  ${paint(nombre.padEnd(ancho), c.blue)}${xyz.x} ${xyz.y} ${xyz.z}`)
+		}
+		return
+	}
+
+	const nombre = primero
+	if (partes.length === 1) {
+		const xyz = chestDe(nombre)
+		if (!xyz) {
+			const otros = listarChests()
+				.map(([n]) => n)
+				.join(', ')
+			warnLine(
+				`chest: no hay ningun cofre con el nombre '${nombre}'` +
+					(otros ? ` (los guardados: ${otros})` : ''),
+			)
+			return
+		}
+		push(`${paint('cofre', c.bold)} ${nombre} = ${xyz.x} ${xyz.y} ${xyz.z}   (store ${nombre})`)
+		return
+	}
+
+	if (partes.length === 2 && (partes[1] === 'rm' || partes[1] === 'del')) {
+		const feito = quitarChest(nombre)
+		if (feito === 'borrado') push(`cofre ${nombre}: borrado`)
+		else if (feito === 'no estaba') warnLine(`chest: no hay ningun cofre con el nombre '${nombre}'`)
+		// 'roto' ya ha avisado `leerChests` del JSON ilegible.
+		return
+	}
+
+	if (partes.length === 4) {
+		const [x, y, z] = partes.slice(1).map(Number)
+		if (![x, y, z].every(Number.isInteger)) {
+			warnLine(`chest ${nombre}: '${partes.slice(1).join(' ')}' no son tres enteros`)
+			return
+		}
+		if (!nombreValido(nombre)) {
+			warnLine(`chest: '${nombre}' no vale como nombre (letras, digitos, _ - y ., hasta 32)`)
+			return
+		}
+		// Con el JSON roto `leerChests` ya ha avisado, y aqui solo se devuelve
+		// el `false`: no se escribe encima de algo que no se ha podido leer.
+		if (ponerChest(nombre, { x: x!, y: y!, z: z! })) {
+			push(`${paint('cofre', c.bold)} ${nombre} = ${x} ${y} ${z}   (store ${nombre})`)
+		}
+		return
+	}
+
+	warnLine('uso -> chest [list | <nombre> | <nombre> x y z | <nombre> rm]')
+}
+
 export const COMMANDS: Record<string, Handler> = {
 	say: async (args, targets) => broadcast(targets, 'POST', '/chat', { message: args }, 'say'),
 	cmd: async (args, targets) =>
@@ -206,6 +282,9 @@ export const COMMANDS: Record<string, Handler> = {
 	disperse,
 	store,
 	storenow: storeNow,
+	chest: async (args, _targets) => {
+		cofres(args)
+	},
 	focus: async (args, _targets) => {
 		focus(args)
 	},
@@ -234,6 +313,9 @@ export const COMMANDS: Record<string, Handler> = {
 COMMANDS.hist = COMMANDS.history
 COMMANDS.bc = COMMANDS.baritone
 COMMANDS.inv = COMMANDS.items
+// El cofre con nombre tambien se puede llamar como el resto de las cosas.
+COMMANDS.chests = COMMANDS.chest
+COMMANDS.cofre = COMMANDS.chest
 
 export const HELP = `
 Panel de control de las instancias de mc-puppeteer.
@@ -242,10 +324,12 @@ Panel de control de las instancias de mc-puppeteer.
   node scripts/tui.ts
 
 Zonas del panel:
-  izquierda  una fila por instancia: estado, mundo, vida, comida, posicion.
-  derecha    inventario de todos los bots sumado, de mas a menos. Con focus
-             se mira solo el de uno, que es el que marca la tabla con >.
-  abajo      feed con el chat y las respuestas; se recorre con las flechas.
+  arriba izq.  bots: dos lineas por instancia, con sus datos y las barras de
+               comida y vida una debajo de otra.
+  arriba der.  feed con el chat y las respuestas; se recorre con las flechas.
+  abajo izq.   inventario de todos los bots sumado, de mas a menos. Con focus
+               se mira solo el de uno, que es el que marca la tabla con >.
+  abajo der.   la linea donde se escriben las ordenes.
 
 Ordenes (con / delante o escribiendolas tal cual):
   say <texto>         Envia chat a las seleccionadas. (chat = say)
@@ -256,18 +340,22 @@ Ordenes (con / delante o escribiendolas tal cual):
   disperse <x y z r>  Reparte las seleccionadas en un radio de r bloques
                       alrededor de x y z, con un #goto a cada una.
   store [x y z]       Vuelca el inventario de las seleccionadas en un cofre.
+                      Acepta tambien un nombre guardado con chest: store cofre.
                       Sin coordenadas, usa el de la config de cada instancia.
                       Camina con Baritone si el cofre esta lejos, coloca uno si
                       no hay ninguno, y se desconecta si no puede.
   storenow            Coloca un cofre donde este cada bot y lo deja.
+  chest <n> <x y z>   Guarda un cofre con nombre para store <nombre>.
+  chest list          Los cofres con nombre que hay. (chest solo tambien)
+  chest <n> rm        Borra uno. (chests y cofre tambien valen)
   connect <servidor>  Conecta a un servidor.
   disconnect          Sale al titulo.
   respawn             Reaparicion.
   profile <nombre>    Cambia la identidad offline.
   status              Fuerza la lectura del estado.
   players             Quien esta en el mundo.
-  items               Inventario de cada seleccionada, en el feed. El de la
-                      derecha suma el de todas.
+  items               Inventario de cada seleccionada, en el feed. El panel de
+                      abajo suma el de todas.
   focus <n|nombre>    Mira el inventario de una sola instancia en vez de la suma
                       de todas (next, first, all para volver a la global).
   history [n]         Historial de chat (por defecto 15). No lo vacia.
@@ -285,6 +373,7 @@ Destino:  @all  @1,3  @mc2      (por defecto, las seleccionadas)
 Atajo:    !texto = say a todas
 Teclas:   con la linea vacia, 1-9 seleccionan, a todas, n ninguna,
           r refresca, l log, Q sale, flechas para recorrer el feed.
+          La leyenda entera esta en agents/08-teclas.md
 
 Modo script (sin panel):
   node scripts/tui.ts --once --connect 1.2.3.4:25565
@@ -292,6 +381,7 @@ Modo script (sin panel):
 
 Opciones:
       --registry F    Registro de instancias (def. run-instances/.instances.json)
+      --chests F      Cofres con nombre (def. scripts/.tui-config.json)
       --scan-from N   Primer puerto del barrido (def. 25580)
       --scan-to N     Ultimo puerto del barrido (def. 25589)
   -e, --every SEG     Intervalo de refresco (def. 2)

@@ -13,6 +13,7 @@ import type { Options, Target } from './types.ts'
 
 export const options: Options = {
 	registry: null,
+	chests: null,
 	scanFrom: 25580,
 	scanTo: 25589,
 	interval: 2,
@@ -31,7 +32,7 @@ export const state = {
 	input: '',
 	scroll: 0,
 	/**
- * Indice de la instancia cuyo inventario se mira en el panel de la derecha, o
+ * Indice de la instancia cuyo inventario se mira en el panel de inventario, o
  * `null` para la vista global: la suma del inventario de todas. Es el
  * defecto, porque lo que se quiere ver de un vistazo es cuanto hay entre
  * todos; `focus` sirve para cuando hace falta mirar uno en concreto.

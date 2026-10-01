@@ -30,6 +30,8 @@ export type ItemInfo = {
 
 export type Options = {
 	registry: string | null
+	/** Fichero de los cofres con nombre; `null` = el de por defecto. */
+	chests: string | null
 	scanFrom: number
 	scanTo: number
 	interval: number
