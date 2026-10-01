@@ -20,6 +20,7 @@ import net.minecraft.world.level.Level
 import net.minecraft.world.level.block.Blocks
 import net.minecraft.world.phys.AABB
 import net.minecraft.world.phys.BlockHitResult
+import net.minecraft.world.phys.Vec3
 import org.slf4j.LoggerFactory
 
 /**
@@ -45,6 +46,20 @@ import org.slf4j.LoggerFactory
  * salida de error. `placing` se salta si en el destino ya hay un cofre, y
  * `storing` se salta si la peticion era de las que solo colocan
  * ([StoreRequest.storeNow]).
+ *
+ * ## Por que `walking` no va al destino sino a un radio
+ *
+ * `#goto x y z` de Baritone pone al bot **en** el bloque que se le pide, no
+ * cerca. Apuntando al destino, el bot intenta meterse en el hueco donde va el
+ * cofre y, como alli no cabe, se coloca un bloque debajo para subirse: ese
+ * bloque es justo el de apoyo que necesita el cofre, asi que despues `placing`
+ * ya no lo puede poner. Ademas el bot se queda metido en el destino, y
+ * [elegirSitio] descarta todo sitio donde quepa el jugador.
+ *
+ * Asi que `walking` busca un sitio **a un radio** del destino
+ * ([puntoDeAproximacion]) y, al llegar, para a Baritone ([entrarEn]). El cofre
+ * va igual a las coordenadas exactas que se han pedido, pero se pone desde
+ * fuera.
  *
  * ## Lo que se respeta del API de Minecraft (verificado con `javap`)
  *
@@ -166,8 +181,9 @@ object ChestStash {
 		// config dijeron uno): entonces el cofre va donde este el bot ahora.
 		val destino = peticion.target?.let { BlockPos(it.x, it.y, it.z) } ?: bloqueDeLosPies(player)
 		val t = Trabajo(destino, peticion.storeNow)
-		t.limiteTotal = System.currentTimeMillis() + TOTAL_MS
 		trabajo = t
+		// `entrarEn` es quien pone los dos relojes, el de la fase y el del
+		// trabajo entero, y ya con la distancia calculada.
 		entrarEn(t, StorePhase.WALKING)
 		logger.info("Peticion de cofre en {} ({}).", t.destino, if (t.storeNow) "solo colocar" else "volcar")
 	}
@@ -188,7 +204,23 @@ object ChestStash {
 		val gameMode = mc.gameMode
 			?: return fallar(t, "El cliente no tiene modo de juego: no hay sesion con la que interactuar")
 
+		// Se mide antes de los relojes: el plazo de caminar sale de esta
+		// distancia, asi que tiene que estar al dia cuando se comprueban. En
+		// cualquier fase vale, no solo en `walking`, porque [entrarEn] la usa
+		// para las dos cosas y `reintentarSiLejos` vuelve a `walking` con ella.
+		t.distanciaPendiente = player.eyePosition.distanceTo(t.destino.center)
+
 		if (System.currentTimeMillis() > t.limite) {
+			// En `walking` el motivo lleva la distancia, que es lo unico que el
+			// llamante puede corregir: sin tope de bloques, quedarse atascado es
+			// el unico modo de fallo posible y la distancia dice cuanto lejos.
+			if (t.fase == StorePhase.WALKING) {
+				return fallar(
+					t,
+					"no se ha podido llegar al cofre de ${t.destino} en su plazo de ${t.plazoLegible()} " +
+						"(aun a ${"%.1f".format(t.distanciaPendiente)} bloques)",
+				)
+			}
 			return fallar(t, "la fase '${t.fase.name.lowercase()}' no ha terminado en su plazo de ${t.plazoLegible()}")
 		}
 
@@ -206,7 +238,7 @@ object ChestStash {
 
 		when (t.fase) {
 			// A menos de ALCANCE ya no se camina: se interactua desde donde este.
-			StorePhase.WALKING -> caminar(t, player)
+			StorePhase.WALKING -> caminar(t, level, player)
 			StorePhase.PLACING -> colocar(t, level, player, gameMode)
 			StorePhase.OPENING -> abrir(t, player, gameMode)
 			StorePhase.STORING -> volcar(t, player, gameMode)
@@ -239,30 +271,34 @@ object ChestStash {
 	 *
 	 * Se manda **una sola vez** al entrar en la fase: repetirla cada tick
 	 * reiniciaria el pathing sin dejarle avanzar.
+	 *
+	 * El punto al que se manda no es el destino sino uno a un radio
+	 * ([puntoDeAproximacion]): ir al destino es lo que hacia que Baritone
+	 * colocase un bloque debajo y que el cofre ya no se pudiera poner ahi.
 	 */
-	private fun caminar(t: Trabajo, player: LocalPlayer) {
+	private fun caminar(t: Trabajo, level: Level, player: LocalPlayer) {
 		val distancia = player.eyePosition.distanceTo(t.destino.center)
 		if (distancia <= ALCANCE) {
 			entrarEn(t, StorePhase.PLACING)
 			return
 		}
-		if (distancia > DISTANCIA_MAXIMA) {
-			return fallar(
-				t,
-				"el cofre esta a ${"%.1f".format(distancia)} bloques y el maximo son ${DISTANCIA_MAXIMA.toInt()}",
-			)
-		}
 		if (!t.ordenEnviada) {
-			controlador?.baritoneGoto(t.destino.x, t.destino.y, t.destino.z)
+			val punto = puntoDeAproximacion(level, player, t.destino) ?: t.destino
+			controlador?.baritoneGoto(punto.x, punto.y, punto.z)
 			t.ordenEnviada = true
 			// `moved` se marca **aqui** y no al entrar en la fase: si el cofre ya
 			// estaba a tiro (que es lo normal con el `chest` de la config), el
 			// bot nunca camina y el `202`/`done` tiene que decir `false`.
 			t.movido = true
 			publicar(t)
-			logger.info("Baritone: caminando al cofre de {}", t.destino)
+			if (punto == t.destino) {
+				logger.info("Baritone: caminando al cofre de {} (sin sitio a un radio)", t.destino)
+			} else {
+				logger.info("Baritone: caminando a {} para poner el cofre de {}", punto, t.destino)
+			}
 		}
-		// Si no llega, lo corta el plazo de la fase (120 s) en `avanzar`.
+		// Si no llega, lo corta el plazo de la fase en `avanzar`, que ya no es
+		// fijo: depende de lo que faltaba por recorrer al entrar en `walking`.
 	}
 
 	/**
@@ -509,13 +545,44 @@ object ChestStash {
 	// --------------------------------------------------------------- utiles
 
 	private fun entrarEn(t: Trabajo, fase: StorePhase) {
+		// Antes de resetear el contador: al salir de `walking` hay que parar a
+		// Baritone, y solo si de verdad se le habia mandado una orden. Sin esto
+		// el bot sigue andando mientras [colocar] trabaja, que es justo cuando
+		// llega a su destino y se coloca un bloque debajo.
+		if (fase != StorePhase.WALKING && t.ordenEnviada) pararBaritone(t)
 		t.fase = fase
 		t.ticksFase = 0
 		t.intentos = 0
 		t.ordenEnviada = false
 		t.iniciado = false
-		t.limite = System.currentTimeMillis() + plazoDe(fase)
+		// El plazo de la fase, y con el el del trabajo entero: los dos dependen
+		// de lo que falta por caminar, asi que se calculan aqui y no al
+		// arrancar. Se reponen en cada vuelta a `walking` porque el destino
+		// puede haberse acercado o alejado.
+		t.limiteCaminar = plazoDeCaminar(t.distanciaPendiente)
+		t.limite = System.currentTimeMillis() + plazoDe(fase, t.distanciaPendiente)
+		t.limiteTotal = System.currentTimeMillis() + totalMs(t.limiteCaminar)
 		publicar(t)
+	}
+
+	/**
+	 * Le dice a Baritone que deje de moverse.
+	 *
+	 * Sin esto el bot sigue caminando mientras coloca y abre el cofre, y como
+	 * su destino era el bloque del cofre, el bloque que se coloca al llegar cae
+	 * justo donde iba el cofre. Es el `cancel` de verdad, no el `forcecancel`:
+	 * si esta cavando se le deja acabar el paso antes de pararse.
+	 */
+	private fun pararBaritone(t: Trabajo) {
+		try {
+			controlador?.baritoneStop(false)
+			logger.info("Baritone parado en {} para poner el cofre.", t.destino)
+		} catch (e: Exception) {
+			// Sin controlador no hay nadie a quien pararlo, y si el envio falla se
+			// sigue adelante: el cofre se intentara poner igual, solo que el bot
+			// seguira moviendose mientras tanto.
+			logger.warn("No se pudo parar Baritone: {}", e.message)
+		}
 	}
 
 	/**
@@ -555,8 +622,17 @@ object ChestStash {
 	/** Un [BlockPos] como [ChestTarget]: lo que viaja en el JSON. */
 	private fun BlockPos.deChestTarget() = ChestTarget(x, y, z)
 
-	private fun plazoDe(fase: StorePhase): Long = when (fase) {
-		StorePhase.WALKING -> CAMINAR_MS
+	/**
+	 * Plazo de una fase.
+	 *
+	 * `walking` es el unico que depende de algo: sin tope de distancia, un cofre
+	 * a mil bloques no cabe en un plazo fijo, asi que se escala con lo que falta
+	 * por recorrer ([Trabajo.distanciaPendiente], se la pasa quien entra en la
+	 * fase). Las demas fases no dependen de donde este el cofre y van por su
+	 * cuenta.
+	 */
+	private fun plazoDe(fase: StorePhase, distanciaPendiente: Double = 0.0): Long = when (fase) {
+		StorePhase.WALKING -> plazoDeCaminar(distanciaPendiente)
 		StorePhase.PLACING -> COLOCAR_MS
 		StorePhase.OPENING -> ABRIR_MS
 		StorePhase.STORING -> VOLCAR_MS
@@ -652,19 +728,36 @@ object ChestStash {
 	/**
 	 * Donde poner el cofre: el destino primero y, si no vale, lo mas cerca posible.
 	 *
-	 * Descarta los sitios que el servidor va a rechazar:
-	 * - el bloque tiene algo que no se puede reemplazar (`canBeReplaced`);
-	 * - el jugador lo ocupa: `BlockItem.canPlace` exige `isUnobstructed` con la
-	 *   forma del propio jugador, asi que un cofre en sus pies no se pone. Por
-	 *   eso `/store/now` acaba poniendo el cofre **al lado** del bot;
-	 * - no hay suelo debajo: un cofre no sobrevive sin cara superior firme
-	 *   (`isFaceSturdy`) y `place` devuelve FAIL;
-	 * - el bloque de apoyo queda a mas de [ALCANCE] de la mano.
+	 * Se prueban en tres pasos, y el primero que acierta gana:
+	 *
+	 * 1. el destino exacto, que es lo que se ha pedido;
+	 * 2. los siete bloques que ya se probaban (debajo, encima y los cuatro lados
+	 *    a la misma altura), por no perder ningun caso que ya funcionaba;
+	 * 3. y si ninguno vale, **anillos completos** alrededor del destino, de uno
+	 *    en uno y de dentro hacia fuera.
+	 *
+	 * El paso 3 es el que arregla `/store/now`: ahi el destino es el bloque que
+	 * pisa el bot, que siempre esta descartado, y la lista de 7 no llega a ningun
+	 * sitio en cuanto el bot esta en un suelo que no es plano y despejado a los
+	 * cuatro lados. Con un anillo de 2 ya sale al borde de una plataforma, y el
+	 * suelo de al lado, un bloque mas abajo, tambien cuenta porque se prueba a
+	 * distintas alturas.
+	 *
+	 * Dentro de cada anillo el orden es el de las coordenadas, asi que el sitio
+	 * elegido es siempre el mismo para el mismo mundo: el que se ha pedido si es
+	 * valido, y si no, el primero valido en la esquina (-1, -1).
+	 *
+	 * Todos los candidatos pasan por [sitioValido], que descarta lo que el
+	 * servidor va a rechazar.
 	 */
 	private fun elegirSitio(level: Level, player: LocalPlayer, destino: BlockPos): Sitio? {
 		val ojo = player.eyePosition
-		val candidatos = listOf(
-			destino,
+
+		fun intentar(candidato: BlockPos): Sitio? =
+			if (sitioValido(level, player, ojo, candidato)) Sitio(candidato, candidato.below()) else null
+
+		intentar(destino)?.let { return it }
+		listOf(
 			destino.below(),
 			destino.above(),
 			destino.offset(1, 0, 0),
@@ -672,25 +765,120 @@ object ChestStash {
 			destino.offset(0, 0, 1),
 			destino.offset(0, 0, -1),
 			destino.above(2),
-		)
-		for (candidato in candidatos) {
-			if (candidato.y !in MIN_Y..MAX_Y) continue
-			if (!level.isLoaded(candidato)) continue
-			val estado = level.getBlockState(candidato)
-			if (!estado.canBeReplaced()) continue
-			if (estado.block == Blocks.CHEST) continue
-			if (AABB(candidato).intersects(player.boundingBox)) continue
+		).firstNotNullOfOrNull { intentar(it) }?.let { return it }
 
-			val soporte = candidato.below()
-			if (!level.isLoaded(soporte)) continue
-			if (!level.getBlockState(soporte).isFaceSturdy(level, soporte, Direction.UP)) continue
-			// El clic va al centro del bloque de apoyo, asi que el alcance se
-			// mide ahi y no al sitio donde ira el cofre.
-			if (ojo.distanceTo(soporte.center) > ALCANCE) continue
-
-			return Sitio(candidato, soporte)
+		for (radio in 1..RADIO_SITIO) {
+			for (dy in ALTURAS_SITIO) {
+				anillo(destino, radio, dy).firstNotNullOfOrNull { intentar(it) }?.let { return it }
+			}
 		}
 		return null
+	}
+
+	/**
+	 * Los bloques de un anillo alrededor de `origen`, a `dy` de altura.
+	 *
+	 * El anillo es el borde de un cuadrado de lado `2 * radio + 1`, no el
+	 * relleno: los puntos de dentro serian el propio origen o estarian encima,
+	 * que es justo donde cabe el jugador.
+	 */
+	private fun anillo(origen: BlockPos, radio: Int, dy: Int): List<BlockPos> {
+		val salida = ArrayList<BlockPos>(radio * 8)
+		for (dx in -radio..radio) {
+			for (dz in -radio..radio) {
+				if (dx != -radio && dx != radio && dz != -radio && dz != radio) continue
+				salida.add(origen.offset(dx, dy, dz))
+			}
+		}
+		return salida
+	}
+
+	/**
+	 * Si un cofre se puede poner en `candidato` desde donde esta el jugador.
+	 *
+	 * Descarta los sitios que el servidor va a rechazar:
+	 * - el bloque tiene algo que no se puede reemplazar (`canBeReplaced`);
+	 * - el jugador lo ocupa: `BlockItem.canPlace` exige `isUnobstructed` con la
+	 *   forma del propio jugador, asi que un cofre en sus pies no se pone. Por
+	 *   eso `/store/now` acaba poniendo el cofre **al lado** del bot;
+	 * - no hay suelo debajo: un cofre no sobrevive sin cara superior firme
+	 *   (`isFaceSturdy`) y `place` devuelve FAIL;
+	 * - el bloque de apoyo queda a mas de [ALCANCE] de la mano. El clic va al
+	 *   centro del bloque de apoyo, asi que el alcance se mide ahi y no al sitio
+	 *   donde ira el cofre.
+	 */
+	private fun sitioValido(
+		level: Level,
+		player: LocalPlayer,
+		ojo: Vec3,
+		candidato: BlockPos,
+	): Boolean {
+		if (candidato.y !in MIN_Y..MAX_Y) return false
+		if (!level.isLoaded(candidato)) return false
+		val estado = level.getBlockState(candidato)
+		if (!estado.canBeReplaced()) return false
+		if (estado.block == Blocks.CHEST) return false
+		if (AABB(candidato).intersects(player.boundingBox)) return false
+
+		val soporte = candidato.below()
+		if (!level.isLoaded(soporte)) return false
+		if (!level.getBlockState(soporte).isFaceSturdy(level, soporte, Direction.UP)) return false
+		return ojo.distanceTo(soporte.center) <= ALCANCE
+	}
+
+	/**
+	 * A que punto se manda a Baritone: a un radio del destino, no al destino.
+	 *
+	 * Se prueban los anillos de [RADIOS], de mas cerca a mas lejos, y dentro de
+	 * cada uno los puntos de [ALTURAS]. Gana el anillo mas cercano que tenga
+	 * algo, porque de el ya se puede poner el cofre, y dentro de el el punto que
+	 * menos camino le cuesta al bot.
+	 *
+	 * @return el punto al que ir, o `null` si alrededor del destino no hay
+	 * ninguno (en un tunel de uno, por ejemplo). Entonces se va al destino como
+	 * antes y decide [elegirSitio].
+	 */
+	private fun puntoDeAproximacion(level: Level, player: LocalPlayer, destino: BlockPos): BlockPos? {
+		// El clic va al centro del bloque de apoyo, y lo que decide si llega es
+		// solo a cuanta distancia horizontal queda el jugador: el anillo de fuera
+		// tiene esquinas, y esas son las que se podrian quedar sin alcance.
+		val soporte = destino.below().center
+		val ojos = player.eyePosition
+
+		for (radio in RADIOS) {
+			var elegido: BlockPos? = null
+			var recorrido = Double.MAX_VALUE
+			for (dy in ALTURAS) {
+				for (punto in anillo(destino, radio, dy)) {
+					if (!sePuedePonerse(level, punto)) continue
+					val desde = punto.center.add(0.0, ALTURA_OJOS, 0.0)
+					if (desde.distanceTo(soporte) > ALCANCE) continue
+
+					val distancia = ojos.distanceTo(punto.center)
+					if (distancia < recorrido) {
+						recorrido = distancia
+						elegido = punto
+					}
+				}
+			}
+			if (elegido != null) return elegido
+		}
+		return null
+	}
+
+	/**
+	 * Si el bot se puede poner de pie en `pos`.
+	 *
+	 * Dos bloques de aire encima (el jugador es algo mas de uno alto) y algo
+	 * firme debajo. La misma comprobacion que hace el mundo al decidir donde se
+	 * puede estar, sin llamar a la API de colision.
+	 */
+	private fun sePuedePonerse(level: Level, pos: BlockPos): Boolean {
+		if (pos.y !in MIN_Y..MAX_Y) return false
+		if (!level.isLoaded(pos) || !level.isLoaded(pos.above(2))) return false
+		if (!level.getBlockState(pos).isFaceSturdy(level, pos, Direction.UP)) return false
+		return level.getBlockState(pos.above()).canBeReplaced() &&
+			level.getBlockState(pos.above(2)).canBeReplaced()
 	}
 
 	private fun unidadesEnElInventario(player: LocalPlayer): Int {
@@ -746,12 +934,22 @@ object ChestStash {
 		val pendientes = ArrayDeque<Int>()
 		var unidadesAntes = 0
 		var turnosParaCerrar = 0
+		/**
+		 * Bloques que faltan por recorrer hasta el destino.
+		 *
+		 * Lo escribe [avanzar] en cada tick, y de el salen los dos relojes: sin
+		 * tope de distancia, el plazo de caminar tiene que depender de lo lejos
+		 * que este el cofre o un destino a mil bloques fallaria por tiempo.
+		 */
+		var distanciaPendiente = 0.0
+		/** Plazo que se le dio a `walking` en la ultima entrada, en milisegundos. */
+		var limiteCaminar = CAMINAR_MS
 
 		/** El plazo de la fase en segundos, para el mensaje de error. */
-		fun plazoLegible(): String = "${plazoDe(this.fase) / 1000} s"
+		fun plazoLegible(): String = "${plazoDe(this.fase, this.distanciaPendiente) / 1000} s"
 
 		/** El plazo total del trabajo en segundos, para el mensaje de error. */
-		fun plazoTotalLegible(): String = "${TOTAL_MS / 1000} s"
+		fun plazoTotalLegible(): String = "${totalMs(this.limiteCaminar) / 1000} s"
 	}
 
 	/** Bloque donde va el cofre y bloque al que hay que hacer clic. */
@@ -767,8 +965,52 @@ object ChestStash {
 	 */
 	private const val ALCANCE = 4.0
 
-	/** Distancia maxima a la que se camina antes de rendirse. */
-	private const val DISTANCIA_MAXIMA = 64.0
+	/**
+	 * Anillos, en bloques, donde se busca un sitio donde ponerse al lado del
+	 * cofre. De mas cerca a mas lejos, y gana el primero que tenga algo.
+	 *
+	 * Son 2 y 3, no mas: a 4 el clic al centro del bloque de apoyo ya se queda
+	 * fuera de [ALCANCE], y a 2 el bot llega antes y coloca antes.
+	 */
+	private val RADIOS = listOf(2, 3)
+
+	/**
+	 * Alturas que se prueban para el sitio donde ponerse, de la misma forma
+	 * relativa al destino: a su altura, una mas abajo y una mas arriba.
+	 *
+	 * La de abajo va la segunda a proposito: el terreno alrededor puede estar un
+	 * bloque mas bajo que el destino, y bajarse no hace dano mientras que subir
+	 * y caer si.
+	 */
+	private val ALTURAS = listOf(0, -1, 1)
+
+	/**
+	 * Altura de los ojos sobre el centro del bloque donde se esta de pie.
+	 *
+	 * Los 1.62 del jugador vanilla. Se miden ahi y no en el sitio donde ira el
+	 * cofre porque el clic va al centro del bloque de apoyo.
+	 */
+	private const val ALTURA_OJOS = 1.62
+
+	/**
+	 * Hasta que anillo se busca sitio para el cofre cuando el destino y sus
+	 * vecinos immediate fallan.
+	 *
+	 * Tres, porque a mas distancia el clic no llega: el alcance son 4 bloques
+	 * desde los ojos, y mas alla de 3 el bloque de apoyo ya queda fuera. Es
+	 * decir, el anillo 3 es el ultimo que puede dar algo, y no un tope chose.
+	 */
+	private const val RADIO_SITIO = 3
+
+	/**
+	 * Alturas que se prueban al buscar el sitio del cofre: a la del destino, una
+	 * mas abajo y una mas arriba.
+	 *
+	 * La de abajo hace falta mas que ninguna otra: al pie de una plataforma o
+	 * al lado de un escalon el suelo esta un bloque mas bajo que donde se ha
+	 * pedido el cofre, y es el unico sitio donde hay apoyo firme.
+	 */
+	private val ALTURAS_SITIO = listOf(0, -1, 1)
 
 	private const val HOTBAR_SIZE = 9
 	/** Ranuras de la barra rapida que quedan despues de las 27 de la mochila. */
@@ -808,17 +1050,64 @@ object ChestStash {
 	/** Margen antes de cerrar, para que el servidor confirme los ultimos clics. */
 	private const val TICKS_ANTES_DE_CERRAR = 3
 
+	/**
+	 * Suelo del plazo de caminar, para cuando el cofre ya esta a tiro o al lado.
+	 *
+	 * Son los 120 s de antes, y es lo que se gasta un `store` de cerca: tiempo de
+	 * sobra para el camino, que a lo que camina Baritone son unos pocos
+	 * segundos, y para un cofre inalcanzable son los 2 minutos antes de fallar.
+	 */
 	private const val CAMINAR_MS = 120_000L
+
 	private const val COLOCAR_MS = 4_000L
 	private const val ABRIR_MS = 3_000L
 	private const val VOLCAR_MS = 15_000L
 
 	/**
+	 * Milisegundos por bloque que hay que sumar al plazo de caminar.
+	 *
+	 * Baritone corre a algo mas de 4 bloques por segundo, o sea que 250 ms por
+	 * bloque es unas seis veces la velocidad real: el plazo no aprieta a un bot
+	 * que avanza y solo corta a uno que se ha quedado atascado. Sin esto, quitar
+	 * el tope de distancia no serviria de nada, porque el cofre de al otro lado
+	 * del mapa seguiria fallando por tiempo en vez de por distancia.
+	 */
+	private const val MS_POR_BLOQUE = 250L
+
+	/**
+	 * Tope al plazo de caminar, para que un destino imposible no se este dos
+	 * horas esperando.
+	 *
+	 * Doce minutos: a 250 ms por bloque son unos 2400 bloques, y con el tope de
+	 * un minuto por bloque de antes el cofre mas lejano posible en un mundo de
+	 * 1.21.5 (30 millones de bloques) seguia fallando. Este es el unico limite
+	 * que queda en la distancia.
+	 */
+	private const val CAMINAR_MS_MAX = 720_000L
+
+	/**
+	 * Plazo de la fase de caminar segun lo que falta por recorrer.
+	 *
+	 * @param distancia bloques que faltan, de ojo al destino. Se mide de ojo al
+	 * centro del bloque, que es como se mide la distancia en el resto del
+	 * fichero.
+	 */
+	private fun plazoDeCaminar(distancia: Double): Long {
+		if (distancia <= 0.0) return CAMINAR_MS
+		val calculado = CAMINAR_MS + (distancia * MS_POR_BLOQUE).toLong()
+		return minOf(calculado, CAMINAR_MS_MAX)
+	}
+
+	/**
 	 * Plazo del trabajo entero, por encima de los plazos por fase.
 	 *
-	 * Suma generosa de los cuatro: normal (120 s) + colocar (4) + abrir (3) +
-	 * volcar (15) = 142 s, y se dejan 100 de margen para las vueltas extra de
-	 * [MAX_VUELTAS] y para las pausas largas de fps.
+	 * Se calcula al arrancar ([Trabajo.limiteTotal]) en vez de ser una constante
+	 * porque el plazo de caminar ya depende de la distancia: con un tope fijo de
+	 * 240 s, un cofre a 2000 bloques se pasaria andando y lo cortaria aqui
+	 * antes de llegar. Se suman los plazos de colocar, abrir y volcar al de
+	 * caminar, mas margen para las vueltas extra de [MAX_VUELTAS] y para las
+	 * pausas largas de fps.
 	 */
-	private const val TOTAL_MS = 240_000L
+	private fun totalMs(caminarMs: Long): Long =
+		caminarMs + COLOCAR_MS + ABRIR_MS + VOLCAR_MS + (MAX_VUELTAS * 60_000L)
 }
