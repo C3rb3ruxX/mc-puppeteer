@@ -6,9 +6,12 @@ La logica de este mod esta partida en dos, y eso determina como se prueba cada p
 |---|---|---|
 | Nucleo HTTP (`main`) | No | Prueba de humo real: se arranca el servidor de verdad y se le pegan peticiones de verdad. |
 | Puente (`client`) | Si | No automatizado. Requiere el juego en marcha. |
+| Mapeo de ranuras del cofre (`client`) | Si (solo la clase real) | `tests/SlotMap.java` se contrasta contra un `ChestMenu` real, sin arrancar el juego. |
 
 La prueba de humo cubre todo el nucleo, incluida la garantia central del mod:
-**que nada se ejecuta fuera del hilo principal**.
+**que nada se ejecuta fuera del hilo principal**. `SlotMap` cubre aparte una
+parte del `client` que si se puede verificar sin arrancar el juego: el mapeo de
+ranuras del cofre.
 
 ---
 
@@ -100,6 +103,45 @@ Hubo antes una copia en `%TEMP%\opencode\SmokeTest.java` con el nombre corto
 `SmokeTest`. Esa variante hacia las mismas comprobaciones, pero rompia el comando documentado
 en cuanto se copiaba al repositorio, porque `javac` no acepta una clase
 publica cuyo nombre no coincida con el del `.java`. Se renombro al integrarla.
+
+### Comprobar el mapeo de ranuras del cofre (`SlotMap`)
+
+`tests/SlotMap.java` es otro programa Java autonomo, pero al contrario que la
+prueba de humo **si necesita las clases del cliente**: comprueba
+`ChestStash.ranuraEnElMenuDelCofre`, que es una funcion del lado `client` y
+traduce una ranura del inventario a la ranura que le corresponde en el
+`ChestMenu` del cofre.
+
+Que comprueba, y por que: el bug viejo restaba 27 a **todas** las ranuras del
+inventario, incluida la mochila (9..35). Asi el clic caia en las ranuras del
+propio cofre, o sea que no se guardaba ninguna de las 27 de la mochila y, con el
+cofre ya con cosas, las sacaba de vuelta. Para fijar el mapeo correcto no lo
+copia a mano: construye un `ChestMenu` de verdad con un `SimpleContainer`,
+recorre `menu.slots` para ver en que ranura del menu cae cada ranura del
+inventario, llama a la funcion del mod por reflexion y compara las 36 ranuras.
+Lo hace con un cofre de 3 y de 6 filas, los tamanos de un cofre simple y de uno
+doble. Ademas comprueba que la funcion devuelve un numero distinto por ranura.
+
+A diferencia de la prueba de humo, esta necesita el **classpath de runtime del
+source set `client`**, con Minecraft y las librerias. Lo imprime el init script
+`tests/client-cp.init.gradle`, que se usa solo para esta prueba y no forma parte
+del build. La tarea `printClientCp` saca el classpath con el prefijo `CP:`, que
+hay que quitar:
+
+```bash
+./gradlew build --offline
+
+cp="$(./gradlew -q -I agents/tests/client-cp.init.gradle printClientCp \
+    --offline --no-configuration-cache | grep '^CP:' | sed 's/^CP://')"
+
+out="${TMPDIR:-/tmp}/slotmap-out"
+mkdir -p "$out"
+javac -nowarn -cp "$cp" -d "$out" agents/tests/SlotMap.java
+java -cp "$out:$cp" SlotMap
+```
+
+Sale `TODO EN VERDE` con `ok las 36 ranuras` para 3 y 6 filas. Tambien sale con
+codigo 1 si algo falla, asi que sirve en CI.
 
 ---
 

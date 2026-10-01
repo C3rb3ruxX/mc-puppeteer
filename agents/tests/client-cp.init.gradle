@@ -1,0 +1,17 @@
+// Init script solo para la prueba del mapeo de ranuras (SlotMap): imprime el
+// classpath de runtime del source set `client`, con Minecraft y las librerias,
+// para poder compilar y ejecutar un programa suelto contra las clases de
+// verdad. No forma parte del build ni toca el repo:
+//
+//   ./gradlew -q -I agents/tests/client-cp.init.gradle printClientCp \
+//       --offline --no-configuration-cache
+//
+// La salida lleva el prefijo `CP:` delante, que hay que quitar. El porque esta
+// en `agents/03-testing.md`.
+gradle.projectsEvaluated {
+	rootProject.tasks.register('printClientCp') {
+		doLast {
+			println 'CP:' + rootProject.sourceSets.client.runtimeClasspath.asPath
+		}
+	}
+}

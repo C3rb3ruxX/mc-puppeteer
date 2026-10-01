@@ -415,10 +415,25 @@ object ChestStash {
 	}
 
 	/**
+	 * Ranura del menu del cofre donde cae la ranura `s` del inventario.
+	 *
+	 * El [ChestMenu] coloca primero el cofre, luego la mochila (inventario 9..35)
+	 * y al final la barra rapida (0..8). Por eso la mochila va 9 ranuras por
+	 * debajo de su numero y la barra 27 por encima. Restarle 27 tambien a la
+	 * mochila mandaba el clic a las ranuras del propio cofre: no guardaba
+	 * ninguna de las 27, y con el cofre ya con cosas las sacaba de vuelta.
+	 *
+	 * El mapeo esta comprobado contra la clase real de 1.21.5 (ver la tabla de
+	 * [volcar]).
+	 */
+	private fun ranuraEnElMenuDelCofre(s: Int, chestSize: Int): Int =
+		chestSize + if (s < HOTBAR_SIZE) MOCHILA_SIZE + s else s - HOTBAR_SIZE
+
+	/**
 	 * Fase 4: volcar el inventario con shift+click ranura a ranura.
 	 *
-	 * El mapeo del [ChestMenu] (verificado en su fuente de 1.21.5, que hace
-	 * `addChestGrid` y despues `addStandardInventorySlots`) es:
+	 * El mapeo del [ChestMenu] (comprobado contra la clase real de 1.21.5, que
+	 * hace `addChestGrid` y despues `addStandardInventorySlots`) es:
 	 *
 	 * | ranura del menu        | contenido                        |
 	 * |------------------------|----------------------------------|
@@ -427,7 +442,7 @@ object ChestStash {
 	 * | `+27..+36`             | barra rapida 0..8                |
 	 *
 	 * o sea, la ranura `s` del inventario va en
-	 * `chestSize + (s < 9 ? s + 27 : s - 9)`.
+	 * `chestSize + (s < 9 ? s + 27 : s - 9)`, que es [ranuraEnElMenuDelCofre].
 	 *
 	 * Se cuenta lo que **sale** del inventario (antes menos despues) y no los
 	 * clics enviados: con el cofre casi lleno un shift+click se queda con
@@ -457,7 +472,7 @@ object ChestStash {
 			val stack = player.inventory.getItem(s)
 			// `ItemStack.isEmpty` es metodo, no campo.
 			if (stack.isEmpty) continue
-			val ranura = chestSize + if (s < 9) s + HOTBAR_OFFSET else s - HOTBAR_OFFSET
+			val ranura = ranuraEnElMenuDelCofre(s, chestSize)
 			gameMode.handleInventoryMouseClick(menu.containerId, ranura, 0, ClickType.QUICK_MOVE, player)
 			enviados++
 		}
@@ -1013,8 +1028,8 @@ object ChestStash {
 	private val ALTURAS_SITIO = listOf(0, -1, 1)
 
 	private const val HOTBAR_SIZE = 9
-	/** Ranuras de la barra rapida que quedan despues de las 27 de la mochila. */
-	private const val HOTBAR_OFFSET = 27
+	/** Ranuras de la mochila: 9..35, las 27 que van antes de la barra. */
+	private const val MOCHILA_SIZE = 27
 	/** Ranuras del inventario que existen en un `ChestMenu`: 0..35. */
 	private const val MENU_INVENTARIO = 36
 
