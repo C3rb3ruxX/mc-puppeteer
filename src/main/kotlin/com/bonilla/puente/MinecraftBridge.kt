@@ -164,6 +164,21 @@ data class ClientStatus(
 	val xpLevel: Int = 0,
 	/** Progreso dentro del nivel actual, de 0 a 1. */
 	val xpProgress: Float = 0f,
+	/**
+	 * Contador de ticks del mundo (`Level.getDayTime()`), que **no se reinicia**.
+	 *
+	 * La hora del dia, que es lo que usa el modo switch, es `dayTime % 24000`:
+	 * justo lo que contesta `/time query daytime`, y no una hora de reloj. Los
+	 * valores de referencia son `0` al amanecer, `6000` a mediodia, `12000` al
+	 * atardecer, `13000` cuando ya es de noche y `18000` a medianoche. Se manda
+	 * el contador crudo y no la hora ya reducida porque es el numero tal cual lo
+	 * lleva el juego; quien lo interprete que le aplique el resto.
+	 *
+	 * `0` cuando no hay mundo. Ojo con el matiz: en un mundo sin sol (Nether,
+	 * End) la cuenta tambien avanza, asi que una hora alta no significa alli que
+	 * se haya hecho de noche. Para eso esta `dimension`, que ya viaja.
+	 */
+	val dayTime: Long = 0L,
 ) {
 	fun toJson(): JsonObject = JsonObject().apply {
 		addProperty("modVersion", modVersion)
@@ -190,6 +205,7 @@ data class ClientStatus(
 		addProperty("z", z)
 		addProperty("xpLevel", xpLevel)
 		addProperty("xpProgress", xpProgress)
+		addProperty("dayTime", dayTime)
 	}
 }
 

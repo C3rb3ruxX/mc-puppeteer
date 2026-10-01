@@ -120,6 +120,10 @@ class ClientBridge(
 			// (`Player.experienceLevel`, `.experienceProgress`), no getters.
 			xpLevel = player?.experienceLevel ?: 0,
 			xpProgress = player?.experienceProgress ?: 0f,
+			// `Level.getDayTime()` (verificado con javap): el contador de ticks
+			// del mundo, que no se reinicia; la hora del dia es `% 24000`. Sin
+			// nivel (menu de titulo) sale el `0` del DTO.
+			dayTime = level?.dayTime ?: 0L,
 		)
 	}
 

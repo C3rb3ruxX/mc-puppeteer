@@ -60,7 +60,7 @@ public class PuenteSmokeTest {
 				onMainThreadCalls.incrementAndGet();
 				return new ClientStatus("1.0.0", "1.21.5", true, "ChatScreen", "Steve", "uuid-1",
 					"localhost:25565", "Mi servidor", null, "minecraft:overworld", 144, 3, 20, true,
-					isDead.get(), 18f, 20f, 17, 4.5f, 1.5, 64.0, -2.5, 3, 0.5f);
+					isDead.get(), 18f, 20f, 17, 4.5f, 1.5, 64.0, -2.5, 3, 0.5f, 13000L);
 			}
 			@Override public InventorySnapshot inventory() {
 				onMainThreadCalls.incrementAndGet();
@@ -187,6 +187,10 @@ public class PuenteSmokeTest {
 			r.body().contains("\"x\":1.5") && r.body().contains("\"y\":64.0") && r.body().contains("\"z\":-2.5"), r.body());
 		check("[9c] status incluye experiencia",
 			r.body().contains("\"xpLevel\":3") && r.body().contains("\"xpProgress\":0.5"), r.body());
+		// La hora del mundo la usa el modo switch del panel para saber cuando
+		// anochece; sin ella no podria disparar el guardado.
+		check("[9d] status incluye la hora del mundo",
+			r.body().contains("\"dayTime\":13000"), r.body());
 
 		r = call("GET", "/status", null, "token incorrecto");
 		check("[10] /status con token erroneo -> 401", r.status() == 401, r.body());

@@ -152,7 +152,8 @@ curl.exe -s "$BASE/status" -H $AUTH
     "y": 71.0,
     "z": -45.5,
     "xpLevel": 7,
-    "xpProgress": 0.25
+    "xpProgress": 0.25,
+    "dayTime": 265000
   }
 }
 ```
@@ -176,6 +177,7 @@ tener que preguntar por otra parte:
 | `xpLevel` | entero | Nivel de experiencia. |
 | `xpProgress` | numero | Progreso dentro del nivel, de 0 a 1. |
 | `dead` | booleano | `true` si hay jugador y tiene 0 de vida. |
+| `dayTime` | entero | Contador de ticks del mundo; la hora del dia es `dayTime % 24000`. |
 
 Todos van como numeros planos, nunca como `null`. Cuando no hay jugador (menu de
 titulo, pantalla de conexion) se mandan los valores neutros: `health` `0`,
@@ -183,6 +185,28 @@ titulo, pantalla de conexion) se mandan los valores neutros: `health` `0`,
 `0`. Por eso `inWorld` sigue siendo el campo que hay que mirar antes de fiarse de
 los vitales: un `health` de 0 con `inWorld` `false` quiere decir "no hay
 jugador", no "esta muerto". Para eso esta `dead`, que si distingue los dos casos.
+
+#### La hora del mundo
+
+`dayTime` es el contador de ticks del mundo (`Level.getDayTime()`) y **no se
+reinicia**: cuando un dia llega a `24000`, el siguiente empieza en `24001`, no
+en `0`. La hora del dia es el resto de dividir entre los ticks del dia,
+`dayTime % 24000`, que es **la unidad cruda del juego** y no una hora de reloj:
+`0` es el amanecer, `6000` el mediodia, `12000` el atardecer, `13000` cuando ya
+es de noche y `18000` la medianoche. Se manda el contador crudo porque es el
+numero tal cual lo lleva el juego; reducido con `% 24000` es justo lo que
+contesta `/time query daytime`.
+
+Lo usa el modo switch del panel para saber cuando anochece, aplicando el resto.
+Tres avisos:
+
+- En un mundo sin sol (Nether, End) la cuenta **tambien avanza**, asi que una
+  hora alta no significa alli que se haya hecho de noche. Para distinguirlo esta
+  `dimension`, que ya viaja en el mismo `/status`.
+- `0` es "no hay mundo" (menu de titulo), no "es de dia": el amanecer tambien es
+  `0`. Por eso no vale con mirar el numero, hace falta `inWorld`.
+- Con el mod viejo el campo **no llega** (no es que venga a `0`); el panel lo
+  trata como "no hay hora" y no le dispara el guardado a nadie.
 
 ### `GET /players`
 

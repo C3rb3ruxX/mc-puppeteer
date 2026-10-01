@@ -23,7 +23,7 @@ red de pruebas) que:
 1. construye un `MinecraftBridge` **falso** que solo registra en que hilo se
    le llamo,
 2. levanta un `PuenteHttpServer` real en `127.0.0.1:25599`,
-3. le manda 305 peticiones con `java.net.http.HttpClient` y hace 187
+3. le manda 305 peticiones con `java.net.http.HttpClient` y hace 188
    comprobaciones,
 4. comprueba estado HTTP, codigo de error y contenido,
 5. comprueba que el buffer acotado se comporta,
@@ -35,14 +35,14 @@ Los dos numeros de arriba estan medidos, no puestos a ojo, y hay que volver a
 medirlos al anadir comprobaciones:
 
 ```bash
-java -cp "$out:$cp" PuenteSmokeTest | grep -cE '^(PASA|FALLA)'   # -> 187
+java -cp "$out:$cp" PuenteSmokeTest | grep -cE '^(PASA|FALLA)'   # -> 188
 ```
 
 Para las peticiones hay que contar dentro del propio test: un contador en el
 helper `call(...)`, que es el unico sitio por el que pasan todas, impreso con el
 resumen. Ojo con el `[n]` que lleva cada linea: es un contador **manual** que se
 incrementa a mano en el test, no el numero de comprobaciones, asi que `[156]` con
-187 comprobaciones es normal y no hay que "arreglarlo".
+188 comprobaciones es normal y no hay que "arreglarlo".
 
 ### Compilar y ejecutar (Linux / macOS)
 

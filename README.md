@@ -44,7 +44,7 @@ La documentacion vive en [`agents/`](agents/), en este orden:
 | [`05-api.md`](agents/05-api.md) | Referencia de la API con ejemplos listos para copiar y pegar, codigos de error y un bug conocido. |
 | [`06-migracion-1.21.5.md`](agents/06-migracion-1.21.5.md) | La bajada de 26.3 a 1.21.5: versiones, cambios de build, tabla de firmas que cambiaron y como se verifico todo. |
 | [`07-instancias-simultaneas.md`](agents/07-instancias-simultaneas.md) | Lanzar N clientes de Minecraft a la vez, cada uno con su puerto, config, directorio y Baritone. |
-| [`tests/PuenteSmokeTest.java`](agents/tests/PuenteSmokeTest.java) | 187 aserciones sobre el nucleo HTTP, ejecutables sin Minecraft. |
+| [`tests/PuenteSmokeTest.java`](agents/tests/PuenteSmokeTest.java) | 188 aserciones sobre el nucleo HTTP, ejecutables sin Minecraft. |
 
 ## Compilar
 
