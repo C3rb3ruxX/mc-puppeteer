@@ -597,12 +597,11 @@ mas de 4 del centro del bloque de apoyo (las esquinas del anillo de 3 se
 quedan, las de 2 no). Si no hay ninguno (un tunel de uno, por ejemplo) se va al
 destino como antes y decide `placing`.
 
-Cada fase tiene su propio plazo y el trabajo entero tiene otro por encima. Solo
-el de caminar se mueve: 4 s colocando, 3 s abriendo y 15 s volcando son fijos,
-pero caminar dura lo que la distancia (250 ms por bloque, minimo 120 s, tope
-720 s) y el total sale de ahi mas un margen. Al agotarse cualquiera de ellos el
-estado pasa a `failed` con el motivo. `stored` no se rellena hasta el final, asi
-que mientras `state` sea `storing` va a 0: es correcto, no es que falle.
+No hay plazos de tiempo: cada fase (caminar, colocar, abrir, volcar) dura lo que
+haga falta hasta que el paso se completa o falla por un motivo de verdad (sin
+mundo, sin cofre, sin sitio, el juego rechaza...). `stored` no se rellena hasta
+el final, asi que mientras `state` sea `storing` va a 0: es correcto, no es que
+falle.
 
 Un ejemplo de bucle que espera al final:
 
@@ -625,15 +624,12 @@ el fallo fue justo no tener el cofre, eso es justo lo que se queria evitar.
 
 Los motivos que salen en `reason` cubren: que no haya mundo o jugador, que el
 cofre no este en la barra rapida, que no haya sitio libre con suelo debajo, que el
-juego rechace la colocacion o la apertura, y los plazos agotados. Todos en espanol
-y sin acentos.
+juego rechace la colocacion o la apertura, y que el cofre se haya quedado fuera
+de alcance mas veces de las permitidas. Todos en espanol y sin acentos.
 
-No hay tope de distancia: el cofre puede estar en el otro extremo del mapa. Como
-no cabe en un plazo fijo, el tiempo de caminar se calcula con la distancia que
-falta (250 ms por bloque, con un minimo de 120 s y un tope de 720 s), y el plazo
-del trabajo entero se deriva de ese. Agotado el plazo de caminar, el `reason`
-dice a cuantos bloques se ha quedado el bot, que es lo unico que el llamante
-puede corregir.
+No hay tope de distancia ni de tiempo: el cofre puede estar en el otro extremo
+del mapa y el bot camina hacia el hasta llegar. Si Baritone va despacio, se le
+espera; no se corta la operacion por reloj.
 
 #### Lo que no se guarda
 

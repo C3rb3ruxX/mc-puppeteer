@@ -36,9 +36,12 @@ import org.slf4j.LoggerFactory
  *
  * De ahi sale la regla que no se puede romper: **nada de `Thread.sleep`, ni de
  * `sleepTick`, ni de `future.get()` dentro del tick**. El paso del tiempo se
- * cuenta con ticks ([Trabajo.ticksFase]) y con marcas de reloj
- * ([Trabajo.limite]), que se consultan, nunca se esperan. Cada tick hace una
- * cantidad de trabajo acotada y vuelve, asi que el juego sigue a su framerate.
+ * cuenta con ticks ([Trabajo.ticksFase]). Cada tick hace una cantidad de
+ * trabajo acotada y vuelve, asi que el juego sigue a su framerate.
+ *
+ * No hay plazos por tiempo: una fase aguanta lo que haga falta hasta que el
+ * paso se completa o falla por un motivo de verdad (sin mundo, sin cofre, sin
+ * sitio...). Cortar por reloj desconectaba bots que solo iban despacio.
  *
  * ## Las fases
  *
@@ -182,8 +185,6 @@ object ChestStash {
 		val destino = peticion.target?.let { BlockPos(it.x, it.y, it.z) } ?: bloqueDeLosPies(player)
 		val t = Trabajo(destino, peticion.storeNow)
 		trabajo = t
-		// `entrarEn` es quien pone los dos relojes, el de la fase y el del
-		// trabajo entero, y ya con la distancia calculada.
 		entrarEn(t, StorePhase.WALKING)
 		logger.info("Peticion de cofre en {} ({}).", t.destino, if (t.storeNow) "solo colocar" else "volcar")
 	}
@@ -204,38 +205,6 @@ object ChestStash {
 		val gameMode = mc.gameMode
 			?: return fallar(t, "El cliente no tiene modo de juego: no hay sesion con la que interactuar")
 
-		// Se mide antes de los relojes: el plazo de caminar sale de esta
-		// distancia, asi que tiene que estar al dia cuando se comprueban. En
-		// cualquier fase vale, no solo en `walking`, porque [entrarEn] la usa
-		// para las dos cosas y `reintentarSiLejos` vuelve a `walking` con ella.
-		t.distanciaPendiente = player.eyePosition.distanceTo(t.destino.center)
-
-		if (System.currentTimeMillis() > t.limite) {
-			// En `walking` el motivo lleva la distancia, que es lo unico que el
-			// llamante puede corregir: sin tope de bloques, quedarse atascado es
-			// el unico modo de fallo posible y la distancia dice cuanto lejos.
-			if (t.fase == StorePhase.WALKING) {
-				return fallar(
-					t,
-					"no se ha podido llegar al cofre de ${t.destino} en su plazo de ${t.plazoLegible()} " +
-						"(aun a ${"%.1f".format(t.distanciaPendiente)} bloques)",
-				)
-			}
-			return fallar(t, "la fase '${t.fase.name.lowercase()}' no ha terminado en su plazo de ${t.plazoLegible()}")
-		}
-
-		// Plazo total del trabajo, por encima de los plazos por fase: sin el,
-		// una maquina que se reembolsa entre fases (volver a `walking` cuando el
-		// cofre se ha quedado lejos, por ejemplo) podria seguir indefinidamente sin
-		// que ninguna fase llegue a su propio limite.
-		if (System.currentTimeMillis() > t.limiteTotal) {
-			return fallar(
-				t,
-				"el volcado no ha terminado en su plazo total de ${t.plazoTotalLegible()} " +
-					"(fase '${t.fase.name.lowercase()}', destino ${t.destino})",
-			)
-		}
-
 		when (t.fase) {
 			// A menos de ALCANCE ya no se camina: se interactua desde donde este.
 			StorePhase.WALKING -> caminar(t, level, player)
@@ -248,11 +217,11 @@ object ChestStash {
 
 		// La fase puede haber terminado el trabajo por su cuenta (al entrar en
 		// `colocar` sin sitio se llama a `fallar`, que deja `trabajo = null`).
-		// Sin esta comprobacion, el reloj de la fase y `publicar` volverian a
-		// escribir encima del estado terminal que se acaba de fijar.
+		// Sin esta comprobacion, `publicar` volveria a escribir encima del
+		// estado terminal que se acaba de fijar.
 		if (trabajo !== t) return
 
-		// El reloj de la fase avanza aqui, al final: hay fases que usan
+		// El contador de la fase avanza aqui, al final: hay fases que usan
 		// `ticksFase` para lo que solo pasa en su **primer** tick (lanzar el
 		// intento de colocar o abrir), asi que tiene que seguir valiendo 0 en
 		// esa pasada.
@@ -297,8 +266,7 @@ object ChestStash {
 				logger.info("Baritone: caminando a {} para poner el cofre de {}", punto, t.destino)
 			}
 		}
-		// Si no llega, lo corta el plazo de la fase en `avanzar`, que ya no es
-		// fijo: depende de lo que faltaba por recorrer al entrar en `walking`.
+		// Si no llega, se sigue intentando: no hay plazo que corte la fase.
 	}
 
 	/**
@@ -311,8 +279,7 @@ object ChestStash {
 		// El cofre se ha apartado (otro jugador, un piston, una explosion) o el
 		// bot ya no lo tiene a tiro: no hay nada que hacer desde aqui, asi que
 		// se vuelve a `walking`. Con tope de vueltas, para que esto no sea un
-		// bucle infinito (el plazo total de [Trabajo.limiteTotal] es la red
-		// de seguridad de ahi).
+		// bucle infinito.
 		if (reintentarSiLejos(t, player)) return
 
 		if (esCofre(level, t.destino)) {
@@ -570,13 +537,6 @@ object ChestStash {
 		t.intentos = 0
 		t.ordenEnviada = false
 		t.iniciado = false
-		// El plazo de la fase, y con el el del trabajo entero: los dos dependen
-		// de lo que falta por caminar, asi que se calculan aqui y no al
-		// arrancar. Se reponen en cada vuelta a `walking` porque el destino
-		// puede haberse acercado o alejado.
-		t.limiteCaminar = plazoDeCaminar(t.distanciaPendiente)
-		t.limite = System.currentTimeMillis() + plazoDe(fase, t.distanciaPendiente)
-		t.limiteTotal = System.currentTimeMillis() + totalMs(t.limiteCaminar)
 		publicar(t)
 	}
 
@@ -610,9 +570,7 @@ object ChestStash {
 	 * comando del servidor, empujar al bot...).
 	 *
 	 * Solo se permite un par de vueltas ([MAX_VUELTAS]): reintentar sin tope
-	 * seria un bucle infinito en cuanto el cofre no se pueda alcanzar, y la
-	 * red de seguridad ([Trabajo.limiteTotal]) esta pensada para cortes duros,
-	 * no para esperar cuatro minutos.
+	 * seria un bucle infinito en cuanto el cofre no se pueda alcanzar.
 	 */
 	private fun reintentarSiLejos(t: Trabajo, player: LocalPlayer): Boolean {
 		if (player.eyePosition.distanceTo(t.destino.center) <= ALCANCE) return false
@@ -636,23 +594,6 @@ object ChestStash {
 
 	/** Un [BlockPos] como [ChestTarget]: lo que viaja en el JSON. */
 	private fun BlockPos.deChestTarget() = ChestTarget(x, y, z)
-
-	/**
-	 * Plazo de una fase.
-	 *
-	 * `walking` es el unico que depende de algo: sin tope de distancia, un cofre
-	 * a mil bloques no cabe en un plazo fijo, asi que se escala con lo que falta
-	 * por recorrer ([Trabajo.distanciaPendiente], se la pasa quien entra en la
-	 * fase). Las demas fases no dependen de donde este el cofre y van por su
-	 * cuenta.
-	 */
-	private fun plazoDe(fase: StorePhase, distanciaPendiente: Double = 0.0): Long = when (fase) {
-		StorePhase.WALKING -> plazoDeCaminar(distanciaPendiente)
-		StorePhase.PLACING -> COLOCAR_MS
-		StorePhase.OPENING -> ABRIR_MS
-		StorePhase.STORING -> VOLCAR_MS
-		StorePhase.IDLE, StorePhase.DONE, StorePhase.FAILED -> 0L
-	}
 
 	/**
 	 * Si hay un cofre en el bloque.
@@ -934,37 +875,12 @@ object ChestStash {
 		 * (ver [reintentarSiLejos]). Con tope de [MAX_VUELTAS].
 		 */
 		var vueltas = 0
-		/** Fin de la fase en milisegulos de reloj; se consulta, nunca se espera. */
-		var limite = 0L
-		/**
-		 * Fin del trabajo entero, por encima de los plazos por fase.
-		 *
-		 * Sin el, una maquina que se reembolsa entre fases no llegaria nunca a
-		 * que expire ningun plazo por fase y podria quedarse dando vueltas.
-		 */
-		var limiteTotal = 0L
 		/** Colocacion lanzada a la espera de que el bloque aparezca. */
 		var sitio: Sitio? = null
 		/** Ranuras del inventario que quedan por volcar. */
 		val pendientes = ArrayDeque<Int>()
 		var unidadesAntes = 0
 		var turnosParaCerrar = 0
-		/**
-		 * Bloques que faltan por recorrer hasta el destino.
-		 *
-		 * Lo escribe [avanzar] en cada tick, y de el salen los dos relojes: sin
-		 * tope de distancia, el plazo de caminar tiene que depender de lo lejos
-		 * que este el cofre o un destino a mil bloques fallaria por tiempo.
-		 */
-		var distanciaPendiente = 0.0
-		/** Plazo que se le dio a `walking` en la ultima entrada, en milisegundos. */
-		var limiteCaminar = CAMINAR_MS
-
-		/** El plazo de la fase en segundos, para el mensaje de error. */
-		fun plazoLegible(): String = "${plazoDe(this.fase, this.distanciaPendiente) / 1000} s"
-
-		/** El plazo total del trabajo en segundos, para el mensaje de error. */
-		fun plazoTotalLegible(): String = "${totalMs(this.limiteCaminar) / 1000} s"
 	}
 
 	/** Bloque donde va el cofre y bloque al que hay que hacer clic. */
@@ -1064,65 +980,4 @@ object ChestStash {
 
 	/** Margen antes de cerrar, para que el servidor confirme los ultimos clics. */
 	private const val TICKS_ANTES_DE_CERRAR = 3
-
-	/**
-	 * Suelo del plazo de caminar, para cuando el cofre ya esta a tiro o al lado.
-	 *
-	 * Son los 120 s de antes, y es lo que se gasta un `store` de cerca: tiempo de
-	 * sobra para el camino, que a lo que camina Baritone son unos pocos
-	 * segundos, y para un cofre inalcanzable son los 2 minutos antes de fallar.
-	 */
-	private const val CAMINAR_MS = 120_000L
-
-	private const val COLOCAR_MS = 4_000L
-	private const val ABRIR_MS = 3_000L
-	private const val VOLCAR_MS = 15_000L
-
-	/**
-	 * Milisegundos por bloque que hay que sumar al plazo de caminar.
-	 *
-	 * Baritone corre a algo mas de 4 bloques por segundo, o sea que 250 ms por
-	 * bloque es unas seis veces la velocidad real: el plazo no aprieta a un bot
-	 * que avanza y solo corta a uno que se ha quedado atascado. Sin esto, quitar
-	 * el tope de distancia no serviria de nada, porque el cofre de al otro lado
-	 * del mapa seguiria fallando por tiempo en vez de por distancia.
-	 */
-	private const val MS_POR_BLOQUE = 250L
-
-	/**
-	 * Tope al plazo de caminar, para que un destino imposible no se este dos
-	 * horas esperando.
-	 *
-	 * Doce minutos: a 250 ms por bloque son unos 2400 bloques, y con el tope de
-	 * un minuto por bloque de antes el cofre mas lejano posible en un mundo de
-	 * 1.21.5 (30 millones de bloques) seguia fallando. Este es el unico limite
-	 * que queda en la distancia.
-	 */
-	private const val CAMINAR_MS_MAX = 720_000L
-
-	/**
-	 * Plazo de la fase de caminar segun lo que falta por recorrer.
-	 *
-	 * @param distancia bloques que faltan, de ojo al destino. Se mide de ojo al
-	 * centro del bloque, que es como se mide la distancia en el resto del
-	 * fichero.
-	 */
-	private fun plazoDeCaminar(distancia: Double): Long {
-		if (distancia <= 0.0) return CAMINAR_MS
-		val calculado = CAMINAR_MS + (distancia * MS_POR_BLOQUE).toLong()
-		return minOf(calculado, CAMINAR_MS_MAX)
-	}
-
-	/**
-	 * Plazo del trabajo entero, por encima de los plazos por fase.
-	 *
-	 * Se calcula al arrancar ([Trabajo.limiteTotal]) en vez de ser una constante
-	 * porque el plazo de caminar ya depende de la distancia: con un tope fijo de
-	 * 240 s, un cofre a 2000 bloques se pasaria andando y lo cortaria aqui
-	 * antes de llegar. Se suman los plazos de colocar, abrir y volcar al de
-	 * caminar, mas margen para las vueltas extra de [MAX_VUELTAS] y para las
-	 * pausas largas de fps.
-	 */
-	private fun totalMs(caminarMs: Long): Long =
-		caminarMs + COLOCAR_MS + ABRIR_MS + VOLCAR_MS + (MAX_VUELTAS * 60_000L)
 }

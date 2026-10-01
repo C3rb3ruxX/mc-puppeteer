@@ -22,9 +22,8 @@
  * que evita un volcado sorpresa al abrir el panel de la tarde.
  *
  * Un bot al que ya se le esta guardando no entra: el flanco se consume igualmente
- * y esa noche se queda sin guardar. No se ha visto nunca, porque `store` acaba
- * en un plazo de 150 s y la noche dura mas de diez minutos, pero es lo que
- * pasa si se solapan.
+ * y esa noche se queda sin guardar. Es lo que pasa si un `store` se alarga mas
+ * de lo que dura la noche.
  */
 
 import { c, paint } from './ansi.ts'

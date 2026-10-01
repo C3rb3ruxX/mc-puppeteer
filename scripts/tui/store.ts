@@ -101,16 +101,15 @@ const parseTarget = (args: string): Destino => {
 /**
  * Manda la orden y sigue el estado hasta que acaba.
  *
- * El tiempo maximo es propio de cada orden: colocar un cofre y abrirlo son unos
- * segundos, pero caminar puede tardar un minuto. Pasado ese tiempo se avisa y se
- * deja de preguntar: el mod sigue Working igual y su estado se puede volver a
- * mirar con `GET /store` (el panel lo enseña la proxima vez que se pulse `r`).
+ * Sin tope de tiempo: caminar puede tardar lo que tarde Baritone (un cofre al
+ * otro lado del mapa son minutos), y cortar la espera por reloj dejaba al panel
+ * diciendo que algo "sigue sin acabar" cuando el bot iba a llegar. Se sigue
+ * preguntando hasta que el estado es terminal.
  */
 const start = async (
 	target: Target,
 	route: string,
 	body: unknown,
-	timeoutMs: number,
 ): Promise<number> => {
 	const reply: Reply = await call(target, 'POST', route, body, 5000)
 	if (!reply.ok) {
@@ -126,9 +125,8 @@ const start = async (
 	const tag = paint(target.name.padEnd(6), c.blue)
 	push(`${paint(verb, c.bold)} -> ${tag} ${paint('aceptado (202)', c.dim)}; esperando...`)
 
-	const deadline = Date.now() + timeoutMs
 	let anterior = ''
-	while (Date.now() < deadline) {
+	while (true) {
 		await new Promise(resolve => setTimeout(resolve, 700))
 		const read = await call(target, 'GET', '/store', undefined, 5000)
 		if (!read.ok) continue
@@ -150,12 +148,6 @@ const start = async (
 		}
 		if (TERMINALES.has(data.state)) return data.state === 'failed' ? 1 : 0
 	}
-
-	push(
-		`  ${tag} ${paint('sigue sin acabar', c.yellow)} ` +
-			`(agotados los ${Math.round(timeoutMs / 1000)}s de espera; el mod sigue a lo suyo)`,
-	)
-	return 0
 }
 
 /** `store [x y z]`: vuelca el inventario en el cofre de esas coordenadas. */
@@ -175,7 +167,7 @@ export const store = async (args: string, targets: Target[]): Promise<number> =>
 	let failures = 0
 	// En paralelo: cada bot va a lo suyo y no espera a los demas.
 	const results = await Promise.all(
-		targets.map(async t => [t, await start(t, '/store', destino.xyz ?? {}, 150_000)] as const),
+		targets.map(async t => [t, await start(t, '/store', destino.xyz ?? {})] as const),
 	)
 	for (const [, code] of results) failures += code
 	return failures
@@ -188,7 +180,7 @@ export const storeNow = async (_args: string, targets: Target[]): Promise<number
 		return 1
 	}
 	const results = await Promise.all(
-		targets.map(async t => [t, await start(t, '/store/now', {}, 30_000)] as const),
+		targets.map(async t => [t, await start(t, '/store/now', {})] as const),
 	)
 	return results.reduce((total, [, code]) => total + code, 0)
 }

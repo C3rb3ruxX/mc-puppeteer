@@ -345,20 +345,19 @@ store: 'cofre' = 10 -60 4
   leer**, que seria dejar al usuario sin sus cofres y sin aviso de por que.
 - **Camina con Baritone** si el cofre esta a mas de 4 bloques, asi que el
   `store` de verdad necesita `PUPPETEER_BARITONE_ASYNC=1` (el lanzador ya la
-  pone). No hay tope de distancia; el tiempo de espera sale de lo lejos que este
-  el cofre (250 ms por bloque, de 120 s a 720 s).
+  pone). No hay tope de distancia ni de tiempo: camina hasta llegar.
 - Si en el destino no hay cofre, **coloca uno**, y para eso el bot necesita
   tener un cofre **en la barra rapida** (ranuras 0-8, no solo en el inventario:
   solo se puede colocar con la ranura seleccionada, y un cofre mas alla no se
   saca). Si no puede (no tiene, no esta en la barra rapida, no se puede colocar,
-  no se abre, o se agota la espera), **se desconecta** y el motivo sale en el
-  feed: un bot atascado en un servidor de farm estorba mas que uno que se va.
+  no se abre), **se desconecta** y el motivo sale en el feed: un bot atascado en
+  un servidor de farm estorba mas que uno que se va.
 - Vuelca las **36 ranuras del inventario**. La armadura (ranuras 36-39) y la mano
   secundaria (40) **no se pueden guardar**: en vanilla no caben en un cofre, y
   mandar esas ranuras al menu revienta. El bot se los queda puestos. Para
   desatarse hay que hacerlo a mano con `/item replace`.
-- El panel espera 150 s para `store` y 30 s para `storenow`. Si se agotan, avisa
-  y deja de preguntar, pero **el mod sigue a lo suyo**: no se cancela nada.
+- El panel no corta la espera: sigue leyendo el estado hasta que acaba (`done` o
+  `failed`). Si el bot tarda, se espera; no hay plazo que lo deje a medias.
 
 ### `switch [list | off | <nombre> | <hora 1-23999>]`
 
