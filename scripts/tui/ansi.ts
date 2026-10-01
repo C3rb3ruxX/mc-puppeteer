@@ -30,7 +30,7 @@ export const c = {
 }
 
 export const paint = (text: string, ...styles: string[]): string =>
-	color ? `${styles.join('')}${text}${c.reset}` : text
+	color && text !== '' ? `${styles.join('')}${text}${c.reset}` : text
 
 const ANSI = /\x1b\[[0-9;]*m/g
 
@@ -49,15 +49,63 @@ export const pad = (text: string, width: number): string => {
 
 const stripColorCodes = (text: string): string => text.replace(ANSI, '')
 
-/** Barra de `size` caracteres, coloreada segun cuanto queda. */
-export const bar = (value: unknown, max: unknown, size = 6): string => {
+/**
+ * Barra de `size` caracteres, coloreada segun cuanto queda.
+ *
+ * `tono` fija el color y salta el del nivel: la barra de comida va siempre en
+ * amarillo y la de vida en verde/amarillo/rojo, para que las dos se distingan
+ * de un vistazo aunque las dos esten llenas.
+ */
+export const bar = (value: unknown, max: unknown, size = 6, tono?: string): string => {
 	const v = Number(value)
 	const m = Number(max)
 	if (!Number.isFinite(v) || !Number.isFinite(m) || m <= 0) return paint('-'.repeat(size), c.dim)
 	const ratio = Math.max(0, Math.min(1, v / m))
 	const filled = Math.round(ratio * size)
-	const tone = ratio <= 0.25 ? c.red : ratio <= 0.5 ? c.yellow : c.green
-	return paint('█'.repeat(filled), tone) + paint('░'.repeat(size - filled), c.dim)
+	const color = tono ?? (ratio <= 0.25 ? c.red : ratio <= 0.5 ? c.yellow : c.green)
+	return paint('█'.repeat(filled), color) + paint('░'.repeat(size - filled), c.dim)
+}
+
+/** Token de una linea: una secuencia de escape entera, o un caracter. */
+const TOKEN = /\x1b\[[0-9;]*[A-Za-z]|[\s\S]/g
+
+/**
+ * Parte un texto en lineas de `width` columnas visibles, sin cortar una
+ * secuencia de escape por la mitad y partiendo por espacios cuando se puede.
+ *
+ * El feed va en una columna estrecha, asi que casi todo el chat necesita mas de
+ * una linea. Cortarlo con el `…` de `pad` perderia el final del mensaje, que es
+ * justo la parte interesante.
+ */
+export const wrap = (text: string, width: number): string[] => {
+	const out: string[] = []
+	for (const logica of text.split('\n')) {
+		const tokens = logica.match(TOKEN) ?? []
+		if (visible(logica) <= width) {
+			out.push(logica)
+			continue
+		}
+
+		let actual = ''
+		let vis = 0
+		let ultimoEspacio = -1
+		for (const token of tokens) {
+			const escape = token.startsWith('\x1b')
+			if (!escape && vis >= width) {
+				// Corte por el ultimo espacio si lo hubo; si no, a lo bruto.
+				const sobra = ultimoEspacio > 0 ? actual.slice(ultimoEspacio + 1) : ''
+				out.push(ultimoEspacio > 0 ? actual.slice(0, ultimoEspacio) : actual)
+				actual = escape ? '' : sobra
+				vis = visible(sobra)
+				ultimoEspacio = -1
+			}
+			if (!escape && token === ' ') ultimoEspacio = actual.length
+			actual += token
+			if (!escape) vis++
+		}
+		if (actual !== '' || out.length === 0) out.push(actual)
+	}
+	return out
 }
 
 /** Numero alineado a la derecha; `-` si no viene o no es un numero. */

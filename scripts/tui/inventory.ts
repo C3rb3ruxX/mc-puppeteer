@@ -1,5 +1,5 @@
 /**
- * inventory.ts — el panel de la derecha: que llevan los bots, de mas a menos.
+ * inventory.ts — el panel de inventario: que llevan los bots, de mas a menos.
  *
  * Por defecto es la **suma de todas las instancias**: lo que se quiere ver de un
  * vistazo es cuanto hay entre todos. Con `focus <n>` se mira una sola, que es
@@ -110,7 +110,9 @@ export const renderInventory = (
 	const units = rows.reduce((sum, row) => sum + row.count, 0)
 	const top = rows[0]!.count
 	const nameW = Math.max(10, Math.min(20, width - 22))
-	const barW = Math.max(4, width - nameW - 11)
+	// Tope de la barra: en una zona ancha, una barra de 70 caracteres solo empuja
+	// el nombre a la izquierda y no aporta mas informacion que una de 28.
+	const barW = Math.max(4, Math.min(28, width - nameW - 11))
 
 	const lines: string[] = [
 		paint(`  ${rows.length} tipo(s), ${units} unidad(es)`, c.dim),

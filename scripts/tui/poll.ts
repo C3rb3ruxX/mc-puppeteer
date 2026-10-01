@@ -7,7 +7,7 @@
  *     llega, se comprueba con `/health`, que no toca el juego.
  *   - el historial de chat se lee sin vaciar el buffer del mod: solo se pintan
  *     los mensajes nuevos, y la marca avanza al final del volcado.
- *   - el inventario se pide a todas las vivas, porque el panel de la derecha
+ *   - el inventario se pide a todas las vivas, porque el panel de inventario
  *     muestra la suma de todas y no solo una.
  */
 
@@ -74,7 +74,7 @@ export const pullChat = async (targets: Target[]): Promise<void> => {
 }
 
 /**
- * Inventario de todas las instancias vivas, en paralelo: el panel de la derecha
+ * Inventario de todas las instancias vivas, en paralelo: el panel de inventario
  * muestra la suma, asi que hacen falta todas. Con `focus` solo se mira una, pero
  * volver a la vista global no deberia costar un ciclo entero de peticiones, y el
  * precio son como mucho 41 ranuras por bot (y solo las ocupadas).
