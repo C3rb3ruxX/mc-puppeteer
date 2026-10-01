@@ -19,6 +19,12 @@ export type Target = {
 	up: boolean
 	/** Marca del ultimo mensaje de chat ya pintado, para no repetir. */
 	lastChat: number
+	/**
+	 * Cofre del modo switch: el nombre de la config al que va este bot al
+	 * anochecer, o `null` si no tiene ninguno asignado. Sale de
+	 * `.tui-config.json` y lo aplica `aplicaAsignados`.
+	 */
+	cofre: string | null
 }
 
 export type ItemInfo = {

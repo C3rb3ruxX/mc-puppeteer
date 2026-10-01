@@ -83,7 +83,7 @@ const renderFeed = (width: number, height: number): string[] => {
  * lista completa esta en `agents/08-teclas.md`.
  */
 const SHORTCUTS =
-	'/say /cmd /baritone /disperse /store /chest /storenow /connect /items /focus /every /sel /quit · @1,3 · 1-9 · Q'
+	'/say /cmd /baritone /disperse /store /chest /switch /storenow /connect /items /focus /every /sel /quit · @1,3 · 1-9 · Q'
 
 /** Linea de la zona de ordenes: el prompt arriba y el recordatorio abajo. */
 const renderPrompt = (width: number, height: number): string[] => {

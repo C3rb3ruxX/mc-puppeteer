@@ -12,7 +12,7 @@
 
 import { c, paint } from './ansi.ts'
 import { call, trimBody } from './api.ts'
-import { chestDe, listarChests, type Coord } from './chests.ts'
+import { chestDe, listarChests, type Coord } from './config.ts'
 import { push, warnLine } from './state.ts'
 import type { Reply, Target } from './types.ts'
 

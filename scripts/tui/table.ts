@@ -23,6 +23,8 @@ type Row = {
 	selected: boolean
 	status: Record<string, unknown> | null
 	latencyMs: number | null
+	/** Cofre del modo switch, o `null` si ese bot no tiene ninguno. */
+	cofre: string | null
 }
 
 /** Caracteres de las barras de comida y vida. */
@@ -93,8 +95,24 @@ type Column = {
 }
 
 /**
+ * Ancho de la columna del cofre del modo switch.
+ *
+ * Es el nombre de un cofre guardado, y el limite de nombres es de 32
+ * caracteres: a lo ancho que de verdad se va a ver esto, ni de lejos caben
+ * todos. Se corta por el final, que es donde esta lo que distingue un nombre
+ * de otro (`principal`, `principal-2`), y se avisa con un `…`.
+ */
+const COFRE_W = 11
+
+/** El cofre del modo switch de una instancia, o un guion si no tiene. */
+const cofreCell = (row: Row): string => {
+	if (!row.cofre) return paint('-'.padStart(COFRE_W), c.dim)
+	return pad(row.cofre.length > COFRE_W ? `${row.cofre.slice(0, COFRE_W - 1)}…` : row.cofre, COFRE_W)
+}
+
+/**
  * Las columnas y lo que ocupa cada una. El orden de prioridad es el de esta
- * lista: primero lo basico (instancia, puerto, uuid, estado, dimension,
+ * lista: primero lo basico (instancia, puerto, uuid, estado, cofre, dimension,
  * coordenadas y las dos barras) y despues, segun el ancho que sobre, mundo,
  * jugadores, fps y latencia.
  */
@@ -103,6 +121,7 @@ const COLUMNS: Column[] = [
 	{ title: 'puerto', width: 6, cell: (_s, row) => String(row.port) },
 	{ title: 'uuid', width: 4, cell: s => uuidCell(s) },
 	{ title: 'estado', width: 12, cell: (_s, row) => screenOf(row.status) },
+	{ title: 'cofre', title2: 'switch', width: COFRE_W, cell: (_s, row) => cofreCell(row) },
 	{ title: 'dim', width: 6, cell: (s, row) => (row.up ? shortDim(s.dimension) : '-') },
 	{ title: 'pos', width: POS_W, cell: s => posCell(s) },
 	{
@@ -138,21 +157,31 @@ const sumOf = (cols: Column[]): number =>
 	PREFIX + cols.reduce((total, col) => total + col.width + COL_GAP, 0) - COL_GAP
 
 /**
+ * Donde esta una columna, por su titulo.
+ *
+ * Los grupos de abajo se elegian con numeros sueltos (`COLUMNS[7]`), que en
+ * cuanto se inserta una columna en medio se quedan apuntando a la que no es. Con
+ * el titulo, insertar o quitar una columna no rompe nada.
+ */
+const idx = (title: string): number => COLUMNS.findIndex(col => col.title === title)
+
+/**
  * Ancho minimo (con prefijo) para meter cada grupo de columnas. Salen de la
  * propia lista, asi que anadir o ensanchar una columna no deja numeros sueltos
  * que se queden cortos.
  */
-const BASICAS = sumOf(COLUMNS.slice(0, 7))
-const CON_MUNDO = sumOf(COLUMNS.slice(0, 8))
-const CON_JUG = sumOf(COLUMNS.slice(0, 9))
-const CON_FPS = sumOf(COLUMNS.slice(0, 11))
+const BASICAS = sumOf(COLUMNS.slice(0, idx('comida') + 1))
+const CON_MUNDO = sumOf(COLUMNS.slice(0, idx('mundo') + 1))
+const CON_JUG = sumOf(COLUMNS.slice(0, idx('jug') + 1))
+const CON_FPS = sumOf(COLUMNS.slice(0, idx('ms') + 1))
 
 /**
  * Columnas que se van primero cuando el ancho aprieta, en este orden.
  *
  * Son las que se deducen de las demas o de un vistazo: la dimension se lee en la
  * posicion, y el estado se ve en si el punto de la fila esta verde. Las barras no
- * son deducibles de nada, asi que son las ultimas en irse.
+ * son deducibles de nada, asi que son las ultimas en irse. El cofre tampoco lo es:
+ * es lo unico que dice si ese bot tiene el switch puesto.
  */
 const DEDUCIBLES = ['dim', 'estado', 'pos']
 
@@ -166,10 +195,10 @@ const DEDUCIBLES = ['dim', 'estado', 'pos']
  * peor que no ver esa columna.
  */
 export const visibleColumns = (width: number): Column[] => {
-	const cols = COLUMNS.slice(0, 7)
-	if (width >= CON_MUNDO) cols.push(COLUMNS[7]!)
-	if (width >= CON_JUG) cols.push(COLUMNS[8]!)
-	if (width >= CON_FPS) cols.push(COLUMNS[9]!, COLUMNS[10]!)
+	const cols = COLUMNS.slice(0, idx('comida') + 1)
+	if (width >= CON_MUNDO) cols.push(COLUMNS[idx('mundo')]!)
+	if (width >= CON_JUG) cols.push(COLUMNS[idx('jug')]!)
+	if (width >= CON_FPS) cols.push(COLUMNS[idx('fps')]!, COLUMNS[idx('ms')]!)
 	while (cols.length > 1 && sumOf(cols) > width) {
 		const deducible = cols.findIndex(col => DEDUCIBLES.includes(col.title))
 		cols.splice(deducible > 0 ? deducible : cols.length - 1, 1)

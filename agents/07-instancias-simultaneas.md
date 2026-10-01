@@ -102,9 +102,11 @@ run-instances/mc1/
 run-instances/.instances.json  registro: nombre, puerto, token y carpeta de cada una
 scripts/.cache/              baritone + argfiles
 scripts/.run-config.json     lo que dice Gradle
+scripts/.tui-config.json     cofres con nombre y modo switch del panel
 ```
 
-Los ultimos tres estan en `.gitignore`.
+Los tres primeros estan en `.gitignore`. El ultimo **no**: los cofres y las
+asignaciones del switch son cosa del proyecto y conviene que viajen con el.
 
 El registro lo escribe el lanzador al arrancar y lo lee el TUI, que asi no
 tiene que adivinar puertos (ademas barre `--scan-from`..`--scan-to` por si
@@ -201,8 +203,13 @@ Todo lo demas esta en `scripts/tui/`, para editar una cosa sin releer 1600 linea
 | `view.ts` | el compositor: reparte ancho y alto en las cuatro zonas y pinta |
 | `commands.ts` | las ordenes y el `/help` |
 | `store.ts` | `store` y `storenow`: manda la orden y va leyendo el estado |
-| `chests.ts` | los cofres con nombre de `store <nombre>`, en `scripts/.tui-config.json` |
+| `config.ts` | el unico que lee y escribe `scripts/.tui-config.json`: los cofres con nombre y el modo switch |
+| `switch.ts` | el modo switch: mira la hora del mundo y, al anochecer, manda a cada bot a su cofre |
 | `panel.ts` | lo que pasa al escribir o al pulsar una tecla |
+
+`config.ts` es el **unico** modulo que escribe `.tui-config.json`. Con dos, cada
+uno reescribiendo lo suyo entero, uno se comeria la seccion del otro sin que se
+note; por eso los cofres y el switch viven juntos y no repartidos.
 
 Para cambiar el aspecto del panel basta con tocar tres sitios: las constantes de
 `view.ts` (`W_LEFT`, `W_RIGHT` y `H_TOP`: como se reparten ancho y alto entre las
@@ -225,11 +232,12 @@ Ordenes: `say`/`chat`, `cmd`, `connect`, `disconnect`, `respawn`, `profile`,
 `status`, `health`, `players`, `items`, `history [n]`, `baritone`, `disperse`,
 mas las del panel: `every <seg>`, `scan`, `token <t>`, `sel <n|all|none>`,
 `log <n> [mcN]`, `focus <n|nombre|all>`, `store [x y z|<nombre>]`, `storenow`,
-`chest [list|<nombre>|<nombre> x y z|<nombre> rm]`, `target`, `clear`, `help`,
+`chest [list|<nombre>|<nombre> x y z|<nombre> rm]`,
+`switch [list|off|<nombre>|<hora 1-23999>]`, `target`, `clear`, `help`,
 `quit`. Con `/` delante o tal cual.
 
 `baritone` usa el endpoint propio (`GET /baritone/version`, `/proc`, `/eta`,
-`/modified`, `/paused`, `/wp`, `/gc`) y para todo lo demando manda la orden por
+`/modified`, `/paused`, `/wp`, `/gc`) y para todo lo demas manda la orden por
 chat con `#`, que es como Baritone la espera y asi admite argumentos libres
 (`#goto 100 64 200`).
 
@@ -351,6 +359,58 @@ store: 'cofre' = 10 -60 4
   desatarse hay que hacerlo a mano con `/item replace`.
 - El panel espera 150 s para `store` y 30 s para `storenow`. Si se agotan, avisa
   y deja de preguntar, pero **el mod sigue a lo suyo**: no se cancela nada.
+
+### `switch [list | off | <nombre> | <hora 1-23999>]`
+
+El modo switch: al anochecer, cada bot va solo a su cofre y lo vacia. Es el
+`store` de siempre, pero disparado por el reloj del mundo en vez de a mano.
+
+```
+> @1,2 switch cofre
+switch: mc1, mc2 -> 'cofre', al anochecer (13000 de las 24000)
+
+> switch list
+switch: al caer la noche, al cofre asignado. Anochece a las 13000 de las 24000.
+  mc1      cofre        10 -60 4
+  mc2      cofre        10 -60 4
+
+> switch 13200
+switch: anochece a las 13200 de las 24000
+
+> @2 switch off
+switch: fuera mc2
+```
+
+- **A quien se aplica** sale del destino de siempre, `@1,3` o `sel`; es una
+  orden mas, de modo que `@all switch cofre` los pone a todos. La asignacion se
+  ve en la columna `cofre` de la tabla.
+- **Que es de noche** lo decide la hora del **mundo** (`dayTime` de `/status`,
+  reducido con `% 24000`: el contador de Minecraft no se reinicia y sigue
+  creciendo dia tras dia), no el reloj del sistema: un servidor con la noche
+  puesta a las ocho de la manana seguiria siendo de noche a las once. `13000` es
+  la noche de vanilla (el atardecer es a `12000`), y con un numero se cambia el
+  umbral. `switch 13200` **no** es un nombre de cofre: un nombre no puede ser un
+  numero suelto, asi que no hay ambiguedad. El rango util es `1`-`23999`: con `0`
+  o `24000` el dia entero seria noche y no quedaria ningun momento de dia al que
+  volver a disparar, asi que se rechazan con aviso en vez de no hacer nada sin
+  decir por que.
+- **Dispara por flanco**: se guarda la hora anterior de cada bot y solo se
+  manda el `store` cuando ha pasado de dia a noche. Sin eso, cada refresco
+  durante la noche volveria a mandar otro. Al amanecer se rearma para la noche
+  siguiente.
+- **Al arrancar el panel no dispara nada**, aunque ya sea de noche: se toma la
+  hora actual como referencia. Asi abrir el panel de madrugada no le suelta un
+  volcado a nadie.
+- Solo se disparan las vivas, **en el mundo** y con un cofre que siga existiendo
+  en la config (`store` a un bot en el menu de titulo falla y ademas
+  desconecta). Con el mod viejo, sin `dayTime`, no dispara ninguno.
+- El `store` va **en segundo plano**: el guardado de un bot puede tardar dos
+  minutos y el bucle del panel no se queda esperandolo. Mientras un bot esta
+  guardandose no se le encadena otro.
+- Se guarda en `scripts/.tui-config.json`, en la misma seccion `switch`, y
+  sobrevive a cerrar el panel. La asignacion va **por nombre de instancia** y no
+  por indice, porque el mismo bot puede salir en otro numero segun cuales esten
+  levantadas.
 
 ### Teclas
 

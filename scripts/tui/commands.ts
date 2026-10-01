@@ -8,10 +8,23 @@
 
 import { bar, c, paint, pad } from './ansi.ts'
 import { broadcast, call, trimBody } from './api.ts'
-import { chestDe, listarChests, nombreValido, ponerChest, quitarChest, rutaChests } from './chests.ts'
+import {
+	chestDe,
+	listarChests,
+	NIGHT_AT_MAX,
+	NIGHT_AT_MIN,
+	nightAt,
+	nombreValido,
+	ponerAsignado,
+	ponerChest,
+	ponerNightAt,
+	quitarChest,
+	rutaConfig,
+} from './config.ts'
 import { groupItems } from './inventory.ts'
 import { push, state, warnLine } from './state.ts'
 import { store, storeNow } from './store.ts'
+import { aplicaAsignados, describeAsignados } from './switch.ts'
 import type { Handler, ItemInfo, Target } from './types.ts'
 
 /** Consultas de Baritone que el mod expone como GET y sin argumentos. */
@@ -206,10 +219,10 @@ const cofres = (args: string): void => {
 	if (primero === '' || primero === 'list') {
 		const lista = listarChests()
 		if (lista.length === 0) {
-			push(`sin cofres con nombre. Se anaden con  chest <nombre> <x y z>   (${rutaChests()})`)
+			push(`sin cofres con nombre. Se anaden con  chest <nombre> <x y z>   (${rutaConfig()})`)
 			return
 		}
-		push(`cofres con nombre, para  store <nombre>  (${rutaChests()}):`)
+		push(`cofres con nombre, para  store <nombre>  (${rutaConfig()}):`)
 		// La columna se ajusta al nombre mas largo: con un ancho fijo, uno de 20
 		// caracteres empuja a las coordenadas de los demas y la lista deja de
 		// leerse en columna.
@@ -241,7 +254,7 @@ const cofres = (args: string): void => {
 		const feito = quitarChest(nombre)
 		if (feito === 'borrado') push(`cofre ${nombre}: borrado`)
 		else if (feito === 'no estaba') warnLine(`chest: no hay ningun cofre con el nombre '${nombre}'`)
-		// 'roto' ya ha avisado `leerChests` del JSON ilegible.
+		// 'roto' ya ha avisado `leerConfig` del JSON ilegible.
 		return
 	}
 
@@ -255,7 +268,7 @@ const cofres = (args: string): void => {
 			warnLine(`chest: '${nombre}' no vale como nombre (letras, digitos, _ - y ., hasta 32)`)
 			return
 		}
-		// Con el JSON roto `leerChests` ya ha avisado, y aqui solo se devuelve
+		// Con el JSON roto `leerConfig` ya ha avisado, y aqui solo se devuelve
 		// el `false`: no se escribe encima de algo que no se ha podido leer.
 		if (ponerChest(nombre, { x: x!, y: y!, z: z! })) {
 			push(`${paint('cofre', c.bold)} ${nombre} = ${x} ${y} ${z}   (store ${nombre})`)
@@ -264,6 +277,90 @@ const cofres = (args: string): void => {
 	}
 
 	warnLine('uso -> chest [list | <nombre> | <nombre> x y z | <nombre> rm]')
+}
+
+/**
+ * `switch [list | off | <nombre> | <hora 1-23999>]`: el modo switch.
+ *
+ * Con un nombre, se lo asigna a las instancias seleccionadas y las activa: al
+ * anochecer, cada una va ahi con un `store`. Se elige a quien con lo de
+ * siempre, `@1,3` o `sel`, igual que cualquier otra orden.
+ *
+ * Un numero cambia la hora del mundo a la que se considera que ha anochecido
+ * (`13000` es la noche de vanilla, el atardecer es a las `12000`). No se confunde
+ * con un nombre de cofre porque un nombre no puede ser un numero suelto: lo
+ * comprueba `nombreValido`, asi que `switch 13000` solo puede ser la hora.
+ *
+ * `off` le quita el cofre a las seleccionadas, y `list` enseña quien va a donde
+ * y a que hora dispara. Todo se guarda en `.tui-config.json`, asi que sigue
+ * puesto en la siguiente sesion.
+ */
+const modoSwitch = (args: string, targets: Target[]): void => {
+	const partes = args.trim().split(/\s+/).filter(Boolean)
+	const primero = partes[0] ?? ''
+
+	if (primero === '' || primero === 'list') {
+		const lineas = describeAsignados(targets)
+		push(`switch: al caer la noche, al cofre asignado. Anochece a las ${nightAt()} de las 24000.`)
+		if (lineas.length === 0) {
+			push(`  sin bots asignados; se asignan con  @<sel> switch <nombre>`)
+		} else {
+			for (const linea of lineas) push(linea)
+		}
+		return
+	}
+
+	if (partes.length !== 1) {
+		warnLine('uso -> switch [list | off | <nombre> | <hora 1-23999>]   (se aplica a las seleccionadas)')
+		return
+	}
+	if (targets.length === 0) {
+		warnLine('switch: no hay instancias seleccionadas')
+		return
+	}
+
+	if (primero === 'off') {
+		const fuera = targets.filter(t => t.cofre)
+		for (const target of targets) ponerAsignado(target.name, null)
+		// Y a memoria: escribir la config no basta, que el disparo y la columna
+		// de la tabla leen `target.cofre`, no el fichero.
+		aplicaAsignados(targets)
+		push(fuera.length > 0 ? `switch: fuera ${fuera.map(t => t.name).join(', ')}` : 'switch: no habia ninguno asignado')
+		return
+	}
+
+	// Numero: la hora. Un nombre de cofre no puede ser un numero, asi que no hay
+	// nada mas que probar antes de entrar por aqui.
+	if (/^-?\d+$/.test(primero)) {
+		const hora = Number(primero)
+		if (hora < NIGHT_AT_MIN || hora > NIGHT_AT_MAX) {
+			warnLine(
+				`switch: ${hora} no vale como hora; de ${NIGHT_AT_MIN} a ${NIGHT_AT_MAX}. Con 0 o 24000 no ` +
+					'queda ningun momento de dia al que volver a disparar',
+			)
+			return
+		}
+		if (!ponerNightAt(hora)) return
+		push(`switch: anochece a las ${hora} de las 24000`)
+		return
+	}
+
+	if (!nombreValido(primero)) {
+		warnLine(`switch: '${primero}' no vale como nombre (letras, digitos, _ - y ., hasta 32)`)
+		return
+	}
+	if (chestDe(primero) === null) {
+		const otros = listarChests().map(([n]) => n)
+		warnLine(
+			`switch: no hay ningun cofre con el nombre '${primero}'` +
+				(otros.length > 0 ? ` (los guardados: ${otros.join(', ')})` : ' y aun no hay ninguno guardado'),
+		)
+		return
+	}
+	for (const target of targets) ponerAsignado(target.name, primero)
+	// Y a memoria, que el fichero no lo lee nadie en cada refresco.
+	aplicaAsignados(targets)
+	push(`switch: ${targets.map(t => t.name).join(', ')} -> '${primero}', al anochecer (${nightAt()} de las 24000)`)
 }
 
 export const COMMANDS: Record<string, Handler> = {
@@ -284,6 +381,9 @@ export const COMMANDS: Record<string, Handler> = {
 	storenow: storeNow,
 	chest: async (args, _targets) => {
 		cofres(args)
+	},
+	switch: async (args, targets) => {
+		modoSwitch(args, targets)
 	},
 	focus: async (args, _targets) => {
 		focus(args)
@@ -348,6 +448,13 @@ Ordenes (con / delante o escribiendolas tal cual):
   chest <n> <x y z>   Guarda un cofre con nombre para store <nombre>.
   chest list          Los cofres con nombre que hay. (chest solo tambien)
   chest <n> rm        Borra uno. (chests y cofre tambien valen)
+  switch <n>          Modo switch: al anochecer, las seleccionadas van con un
+                      store al cofre <n>. A quien se elige con @1,3 o sel.
+  switch off          Se lo quita a las seleccionadas.
+  switch list         Quien va a donde, y a que hora se dispara.
+  switch <1-23999>    La hora del mundo a la que se considera que ha
+                      anochecido (13000 es la noche de vanilla). No se confunde
+                      con un nombre: un cofre no puede llamarse 13000.
   connect <servidor>  Conecta a un servidor.
   disconnect          Sale al titulo.
   respawn             Reaparicion.

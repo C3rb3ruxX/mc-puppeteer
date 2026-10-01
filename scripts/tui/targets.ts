@@ -9,6 +9,7 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { healthy } from './api.ts'
+import { aplicaAsignados } from './switch.ts'
 import { options, warnLine } from './state.ts'
 import type { Target } from './types.ts'
 
@@ -25,6 +26,7 @@ const blank = (name: string, host: string, port: number): Target => ({
 	latencyMs: null,
 	up: false,
 	lastChat: 0,
+	cofre: null,
 })
 
 export const readRegistry = (projectDir: string): Target[] => {
@@ -81,6 +83,11 @@ export const mergeTargets = (current: Target[], found: Target[]): void => {
 		}
 		current.push(target)
 	}
+	// El cofre del modo switch se refresca para todas: se puede haber cambiado en
+	// la config desde la ultima vez, y al panel no le vale lo que se quedo en
+	// memoria. En una sola pasada, que leer el fichero por instancia es leerlo
+	// diez veces para nada.
+	aplicaAsignados(current)
 }
 
 /** `@all`, `@1,3`, `@mc2`... -> que instancias entran. */

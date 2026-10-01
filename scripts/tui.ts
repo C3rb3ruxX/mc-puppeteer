@@ -17,7 +17,9 @@
  *     inventory.ts  panel derecho: items de mas a menos
  *     view.ts       el compositor de los tres bloques
  *     commands.ts   las ordenes
+ *     config.ts     `scripts/.tui-config.json`: cofres con nombre y modo switch
  *     store.ts      `store` y `storenow`: manda la orden y sigue el estado
+ *     switch.ts     modo switch: al anochecer, cada bot a su cofre
  *     panel.ts      lo que pasa al escribir o pulsar
  *
  * Modo script (sin TUI, util en cron):
@@ -35,6 +37,7 @@ import { HELP } from './tui/commands.ts'
 import { handleKey, isTty, releaseInput, runOrder, startInput } from './tui/panel.ts'
 import { pullChat, pullInventory, refresh } from './tui/poll.ts'
 import { options, push, setEcho, setHooks, state } from './tui/state.ts'
+import { aplicaAsignados, revisaNoche } from './tui/switch.ts'
 import { discover, mergeTargets } from './tui/targets.ts'
 import { draw, render } from './tui/view.ts'
 import type { Options } from './tui/types.ts'
@@ -132,6 +135,11 @@ const tick = async (): Promise<void> => {
 		await refresh(state.targets)
 		await pullChat(state.targets)
 		await pullInventory(state.targets)
+		// Al final, y solo con el estado ya al dia: la decision de "ha anochecido"
+		// se toma con la `dayTime` de este mismo refresco (reducida a la hora del
+		// dia dentro de `revisaNoche`). Va sin `await` porque suelta los `store`
+		// en segundo plano y no tiene nada que esperar.
+		revisaNoche(state.targets)
 	} finally {
 		ticking = false
 	}
@@ -192,6 +200,10 @@ const main = async (): Promise<void> => {
 	})
 
 	const found = await discover(projectDir)
+	// Los cofres del modo switch se aplican nada mas descubrir, para que un bot
+	// con el switch puesto en la sesion anterior empiece a guardarse al llegar la
+	// noche en vez de tener que reasignarse a mano.
+	aplicaAsignados(found)
 	state.targets = found
 	// En modo script todo lo que se va apilando en el feed se escribe en
 	// stdout, y eso incluye la linea de las instancias detectadas.
