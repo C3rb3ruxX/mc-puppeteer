@@ -121,50 +121,67 @@ solo `node:fs`, `node:path`, `node:process`, `node:url` y `fetch`. No usa
 `readline`: lee el teclado byte a byte (`setRawMode` + eventos `data`), que es
 lo unico que funciona igual en Bun y en Node.
 
-El panel tiene tres zonas:
+El panel tiene cuatro zonas en dos columnas, con el reparto en porcentajes
+(`W_LEFT`, `W_RIGHT` y `H_TOP` en `view.ts`): 66% y 30% del ancho util, 60% y 40%
+del alto. Asi se adapta a la terminal sin tener que tocar nada:
 
 ```
-mc-puppeteer · 3 instancia(s), 3 viva(s) · cada 2s · 23:52:02
-┌ instancias                               ┬ inventario · todos                   ┐
-│     inst  puerto estado mundo dim jug    │   7 tipo(s), 343 unidad(es)        │
-│   ● mc1   25580  srv1   mundo sobre 1/20 │   3 bots · 1 sin datos              │
-│   ● mc2   25581  srv2   mundo sobre 2/20 │   126   Tronco de roble  ████████   │
-│   ● mc3   25582  srv3   mundo sobre 3/20 │    95   Adoquín          ██████░░   │
-│     vida        comida     pos   fps  ms │    63   Antorcha         ████░░░░░   │
-└──────────────────────────────────────────┴─────────────────────────────────────┘
-──────────────────────────────────────────────────────────────────────────────
-  mc3    <mc2> prueba final
-  mc2    <mc3> prueba final
-> @1,3 cmd list
-──────────────────────────────────────────────────────────────────────────────
->
-/say /cmd /baritone /disperse /store /storenow /connect /items /focus /every /sel /quit · @1,3 · 1-9 · Q
+mc-puppeteer · 3 instancia(s), 3 viva(s) · cada 2s · 12:12:44
+┌ bots ──────────────────────────────────────────────────────────────┬ chat ────────────────────────────────┐
+│     inst     puerto uuid pos                   comida             │ instancias: mc1:25580                │
+│                                                vida               │ mc2:25581  mc3:25582                 │
+│   ● mc1      25580  a509 [-52, 76, -18]        ████████████████████  20 │ escribe /help para la lista de       │
+│                                                ████████████████████  20 │ ordenes                            │
+│   ● mc2      25581  ---- [0, 0, 0]             ░░░░░░░░░░░░░░░░░░░░   0 │                                    │
+│                                                ░░░░░░░░░░░░░░░░░░░░   0 │                                    │
+│   ● mc3      25582  19a9 [-46, 75, -19]        ████████████████████  20 │                                    │
+│                                                ████████████████████  20 │                                    │
+├──────────────────────────────────────────────────────────────────┼────────────────────────────────────┤
+│   5 tipo(s), 133 unidad(es)                                      │ >                                  │
+│   2 bots · 1 sin datos                                           │                                    │
+│   87    Oak Log              ████████████████████████████        │                                    │
+│   29    Dirt                 █████████░░░░░░░░░░░░░░░░░░░        │                                    │
+│   11    Chest                ████░░░░░░░░░░░░░░░░░░░░░░░░        │                                    │
+│    5    Leaf Litter          ██░░░░░░░░░░░░░░░░░░░░░░░░░░        │                                    │
+│    1    Oak Sapling          ░░░░░░░░░░░░░░░░░░░░░░░░░░░░        │ /say /cmd /baritone /disperse       │
+│                                                                    │ /store /storenow /connect           │
+│                                                                    │ /items /focus /every /sel           │
+│                                                                    │ /quit · @1,3 · 1-9 · Q              │
+└──────────────────────────────────────────────────────────────────┴────────────────────────────────────┘
 ```
 
-- **Izquierda**: una fila por instancia. Las columnas se eligen segun el ancho
-  que queda: primero lo basico (instancia, puerto, estado, mundo, dimension,
-  jugadores) y despues, si sobra, vida, comida y posicion; fps y latencia son lo
-  ultimo que entra y lo primero que se cae. Con una terminal demasiado estrecha
-  el inventario desaparece y la tabla se queda con todo el ancho.
-- **Derecha**: el inventario **de todos los bots, sumado**, de mas a menos: lo
-  que se quiere ver de un vistazo es cuanto hay entre todos. Va con la cantidad a
-  la izquierda, el nombre y una barra escalada al item mas numeroso de lo que se
-  esta mirando. Sale de `GET /inventory`, que se pide a todas las instancias
-  vivas en cada refresco (en paralelo; son solo las ranuras ocupadas).
-  La segunda linea dice cuantos bots se han sumado y, si alguno no ha
-  contestado, cuantos faltan, para que una cifra incompleta no parezca la real.
-- **Foco**: `focus <n|nombre>` estrecha el panel derecho a una sola instancia,
-  que es cuando hace falta saber de quien es cada cosa. La tabla marca con `>` la
-  que esta enfocada y el titulo pasa a `inventario · mc2`. Sin foco el titulo es
+- **Arriba izquierda**: una instancia por fila y **dos lineas por instancia**, con
+  los datos en la primera y las barras de **comida y vida** apiladas en la
+  segunda. Hay dos lineas de cabecera para que se sepa cual de las dos barras es
+  cual. Las columnas se eligen segun el ancho que queda (`visibleColumns` en
+  `table.ts`): primero lo basico (instancia, puerto, uuid, posicion y las dos
+  barras) y despues `mundo`, `jugadores`, `fps` y `ms`. Si aun asi no caben se van
+  quitando las de `DEDUCIBLES` (`dim`, `estado`, `pos`), que son las que se
+  deducen de las demas. Las barras son lo ultimo en irse porque no se deducen de
+  nada.
+- **Arriba derecha**: el `feed`, con el chat de todas mezclado y las respuestas a
+  las ordenes. Se lee de `/chat/history` **sin vaciar los buffers** del mod: se
+  recuerda la marca de tiempo del ultimo mensaje y solo se pinta lo posterior, asi
+  que al abrir el panel no se vuelca el historial anterior. Los mensajes largos se
+  **parten en varias lineas** (`wrap` en `ansi.ts`) en vez de cortarse, que
+  dejaria el final fuera. Flechas y `RePag`/`AvPag` lo recorren.
+- **Abajo izquierda**: el inventario **de todos los bots, sumado**, de mas a
+  menos, con una barra escalada al item mas numeroso de lo que se esta mirando.
+  Sale de `GET /inventory`, que se pide a todas las instancias vivas en cada
+  refresco (en paralelo; son solo las ranuras ocupadas). La segunda linea dice
+  cuantos bots se han sumado y, si alguno no ha contestado, cuantos faltan, para
+  que una cifra incompleta no parezca la real.
+- **Abajo derecha**: el prompt y, debajo del todo, el recordatorio de atajos. Va
+  entero y se reparte en varias lineas si la zona es estrecha, porque un
+  recordatorio al que le falta el final no recuerda nada.
+- **Foco**: `focus <n|nombre>` estrecha el inventario a una sola instancia, que
+  es cuando hace falta saber de quien es cada cosa. La tabla marca con `>` la que
+  esta enfocada y el titulo pasa a `inventario · mc2`. Sin foco el titulo es
   `inventario · todos`. Se vuelve a la suma con `focus all`, y `f` (o
   `focus next`) recorre las instancias y da la vuelta a la global.
-- Abajo: el `feed`, con el chat de todas mezclado y las respuestas a las ordenes.
-  Se lee de `/chat/history` **sin vaciar los buffers** del mod: se recuerda la
-  marca de tiempo del ultimo mensaje y solo se pinta lo posterior. Al abrir el
-  panel no se vuelca el historial anterior. Flechas y `RePag`/`AvPag` lo recorren.
 - Verde: responde. **Amarillo**: vive pero el estado no ha llegado (el hilo
   principal del juego esta ocupado; se comprueba con `/health`, que no lo toca).
-  **Rojo**: no responde.
+  **Rojo**: no responde; sus barras salen en `-`.
 
 ### Como esta partido el codigo
 
@@ -173,23 +190,25 @@ Todo lo demas esta en `scripts/tui/`, para editar una cosa sin releer 1600 linea
 
 | Modulo | Que hace |
 |---|---|
-| `ansi.ts` | colores (`frame` es el azul claro de los marcos, no el gris: hay temas que pintan el gris de negro), ancho **visible** (los codigos de color no ocupan columnas) y barras |
+| `ansi.ts` | colores (`frame` es el azul claro de los marcos, no el gris: hay temas que pintan el gris de negro), ancho **visible** (los codigos de color no ocupan columnas), barras y `wrap` |
 | `types.ts` | los tipos compartidos |
 | `state.ts` | estado, feed y ganchos hacia el arranque |
 | `api.ts` | llamadas HTTP al mod, con tiempo limite |
 | `targets.ts` | descubrimiento de instancias y destinos (`@1,3`) |
 | `poll.ts` | lo que se pregunta en cada refresco (`/status`, chat, inventario) |
-| `table.ts` | panel izquierdo: que columnas hay, cuanto ocupa cada una y las filas |
-| `inventory.ts` | panel derecho: suma los inventarios de todos los bots por tipo de item y las dibuja |
-| `view.ts` | el compositor: reparte el ancho, monta las tres zonas y pinta |
+| `table.ts` | zona de bots: que columnas hay, cuanto ocupa cada una y las dos lineas de cada instancia |
+| `inventory.ts` | zona de inventario: suma los inventarios de todos los bots por tipo de item y las dibuja |
+| `view.ts` | el compositor: reparte ancho y alto en las cuatro zonas y pinta |
 | `commands.ts` | las ordenes y el `/help` |
 | `store.ts` | `store` y `storenow`: manda la orden y va leyendo el estado |
+| `chests.ts` | los cofres con nombre de `store <nombre>`, en `scripts/.tui-config.json` |
 | `panel.ts` | lo que pasa al escribir o al pulsar una tecla |
 
-Para cambiar el aspecto del panel basta con tocar dos sitios: las constantes de
-`view.ts` (`LEFT_MIN`, `RIGHT_MIN`, `LEFT_SHARE`: como se reparte el ancho) y la
-tabla `COLUMNS` de `table.ts` (que columnas hay y cuanto ocupa cada una, con su
-umbral minimo en `NEEDS_GAUGES` / `NEEDS_POS` / `NEEDS_LATENCY`).
+Para cambiar el aspecto del panel basta con tocar tres sitios: las constantes de
+`view.ts` (`W_LEFT`, `W_RIGHT` y `H_TOP`: como se reparten ancho y alto entre las
+cuatro zonas), la tabla `COLUMNS` de `table.ts` (que columnas hay y cuanto ocupa
+cada una) y la lista `DEDUCIBLES` de `table.ts` (cuales se van primero cuando el
+ancho aprieta).
 
 ### Mandar la misma orden a varias
 
@@ -205,8 +224,9 @@ umbral minimo en `NEEDS_GAUGES` / `NEEDS_POS` / `NEEDS_LATENCY`).
 Ordenes: `say`/`chat`, `cmd`, `connect`, `disconnect`, `respawn`, `profile`,
 `status`, `health`, `players`, `items`, `history [n]`, `baritone`, `disperse`,
 mas las del panel: `every <seg>`, `scan`, `token <t>`, `sel <n|all|none>`,
-`log <n> [mcN]`, `focus <n|nombre|all>`, `store [x y z]`, `storenow`, `target`,
-`clear`, `help`, `quit`. Con `/` delante o tal cual.
+`log <n> [mcN]`, `focus <n|nombre|all>`, `store [x y z|<nombre>]`, `storenow`,
+`chest [list|<nombre>|<nombre> x y z|<nombre> rm]`, `target`, `clear`, `help`,
+`quit`. Con `/` delante o tal cual.
 
 `baritone` usa el endpoint propio (`GET /baritone/version`, `/proc`, `/eta`,
 `/modified`, `/paused`, `/wp`, `/gc`) y para todo lo demando manda la orden por
@@ -264,7 +284,7 @@ disperse -> 3 instancia(s) en 30 bloques alrededor de 0 64 0
 - Funciona con el prefijo de destino como cualquier otra orden: sin prefijo, a las
   seleccionadas; `@all`, a todas.
 
-### `store [x y z]` y `storenow`
+### `store [x y z | <nombre>]` y `storenow`
 
 `store` vuelca el inventario de las seleccionadas en un cofre; `storenow`
 coloca un cofre donde este cada bot y lo deja, sin volcar nada.
@@ -275,7 +295,8 @@ coloca un cofre donde este cada bot y lo deja, sin volcar nada.
   mc1    colocando el cofre
   mc1    hecho: 0 unidad(es) al cofre
 
-> store 10 -60 4
+> store cofre
+store: 'cofre' = 10 -60 4
   mc2    aceptado (202); esperando...
   mc2    caminando al cofre
   mc2   abriendo el cofre
@@ -290,9 +311,34 @@ coloca un cofre donde este cada bot y lo deja, sin volcar nada.
 - El cofre es el de las coordenadas que se pasen; sin coordenadas, el de la
   config de cada instancia (`chest` en su `config/mc-puppeteer.json`); sin eso,
   donde este el bot.
+- **En vez de coordenadas se puede escribir un nombre** (`store cofre`), que el
+  panel traduce antes de llamar al mod. Para el mod es indistinguible de
+  `store 10 -60 4`: los nombres viven solo en el panel. Se dan de alta con
+  `chest`, que escribe `scripts/.tui-config.json`:
+  ```
+  > chest cofre 10 -60 4
+  cofre cofre = 10 -60 4   (store cofre)
+  > chest mina 100 -12 -33
+  cofre mina = 100 -12 -33   (store mina)
+  > chest
+  cofres con nombre, para  store <nombre>  (.../scripts/.tui-config.json):
+    cofre        10 -60 4
+    mina         100 -12 -33
+  > chest mina rm
+  cofre mina: borrado
+  ```
+  `chest <nombre>` a secas muestra uno, `chests` y `cofre` valen igual que
+  `chest`, y con `--chests F` se apunta a otro fichero. Un nombre no guardado
+  no se pasa como texto al mod: sale el aviso con la lista de los que si hay.
+  El fichero se puede editar a mano, pero se reescribe entero en cada `chest`,
+  asi que lo que se edite a mano y no este en el panel se pierde. Si el JSON
+  esta roto o una entrada no trae tres enteros, se avisa y se sigue con las
+  demas; y **`chest` no escribe encima de un fichero que no se ha podido
+  leer**, que seria dejar al usuario sin sus cofres y sin aviso de por que.
 - **Camina con Baritone** si el cofre esta a mas de 4 bloques, asi que el
   `store` de verdad necesita `PUPPETEER_BARITONE_ASYNC=1` (el lanzador ya la
-  pone). Distancia maxima 64 bloques y 120 s de espera.
+  pone). No hay tope de distancia; el tiempo de espera sale de lo lejos que este
+  el cofre (250 ms por bloque, de 120 s a 720 s).
 - Si en el destino no hay cofre, **coloca uno**, y para eso el bot necesita
   tener un cofre **en la barra rapida** (ranuras 0-8, no solo en el inventario:
   solo se puede colocar con la ranura seleccionada, y un cofre mas alla no se

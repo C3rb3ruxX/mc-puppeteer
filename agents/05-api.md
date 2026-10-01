@@ -486,6 +486,11 @@ curl.exe -s -X POST "$BASE/store/now" -H $AUTH
 curl.exe -s "$BASE/store" -H $AUTH
 ```
 
+Del `target` solo se admiten numeros: no hay nombres ni alias en el protocolo.
+Los que usa el panel (`store cofre`) son un atajo suyo, resuelto antes de la
+peticion, y para el mod es un `store` de lo mas normal. Ver `store [x y z]` en
+`agents/07-instancias-simultaneas.md`.
+
 Los tres devuelven **la misma forma**, con `state` en minusculas:
 
 ```json
@@ -548,16 +553,32 @@ bloquear el juego en ningun momento):
 
 | Fase | Que hace |
 |---|---|
-| `walking` | Baritone lleva al bot hasta 4 bloques del cofre. No se camina si ya esta a tiro. |
+| `walking` | Baritone lleva al bot a un punto **a un radio** del cofre. No se camina si ya esta a tiro. |
 | `placing` | Coloca el cofre. Se salta si en el destino ya hay uno. |
 | `opening` | Abre el menu del cofre con un segundo `useItemOn` y la mano vacia. |
 | `storing` | `shift+click` ranura a ranura, dos por tick, y cierra. |
 
-Cada fase tiene su propio plazo (120 s caminando, 4 s colocando, 3 s abriendo,
-15 s volcando) y el trabajo entero tiene uno de 240 s. Al agotarse cualquiera de
-ellos el estado pasa a `failed` con el motivo. `stored` no se rellena hasta el
-final, asi que mientras `state` sea `storing` va a 0: es correcto, no es que
-falle.
+El cofre va a las coordenadas pedidas, pero **`walking` no va a ellas**: se para a
+2 o 3 bloques. `#goto x y z` de Baritone pone al bot *en* el bloque que se le
+pide, no cerca, asi que apuntando al destino intenta meterse en el hueco del
+cofre y, al no caber, coloca un bloque debajo para subirse: ese bloque es justo el
+de apoyo que necesita el cofre, y `placing` ya no lo puede poner. A un radio el
+bot llega, se para (`#cancel` al entrar en `placing`) y coloca en el destino
+exacto, que es el primer sitio que se prueba.
+
+Se prueban los anillos de 2 y 3 bloques, y dentro de cada uno las alturas de su
+altura, una mas abajo y una mas arriba, quedandose con el anillo mas cercano que
+tenga suelo firme y hueco para ponerse. De cada punto se descarta el que quede a
+mas de 4 del centro del bloque de apoyo (las esquinas del anillo de 3 se
+quedan, las de 2 no). Si no hay ninguno (un tunel de uno, por ejemplo) se va al
+destino como antes y decide `placing`.
+
+Cada fase tiene su propio plazo y el trabajo entero tiene otro por encima. Solo
+el de caminar se mueve: 4 s colocando, 3 s abriendo y 15 s volcando son fijos,
+pero caminar dura lo que la distancia (250 ms por bloque, minimo 120 s, tope
+720 s) y el total sale de ahi mas un margen. Al agotarse cualquiera de ellos el
+estado pasa a `failed` con el motivo. `stored` no se rellena hasta el final, asi
+que mientras `state` sea `storing` va a 0: es correcto, no es que falle.
 
 Un ejemplo de bucle que espera al final:
 
@@ -579,9 +600,16 @@ incumplida no se distingue de uno sano, y ocupa el sitio del servidor igual. Si
 el fallo fue justo no tener el cofre, eso es justo lo que se queria evitar.
 
 Los motivos que salen en `reason` cubren: que no haya mundo o jugador, que el
-cofre no este en la barra rapida, que no haya sitio libre con suelo debajo, que
-el destino este a mas de 64 bloques, que el juego rechace la colocacion o la
-apertura, y los plazos agotados. Todos en espanol y sin acentos.
+cofre no este en la barra rapida, que no haya sitio libre con suelo debajo, que el
+juego rechace la colocacion o la apertura, y los plazos agotados. Todos en espanol
+y sin acentos.
+
+No hay tope de distancia: el cofre puede estar en el otro extremo del mapa. Como
+no cabe en un plazo fijo, el tiempo de caminar se calcula con la distancia que
+falta (250 ms por bloque, con un minimo de 120 s y un tope de 720 s), y el plazo
+del trabajo entero se deriva de ese. Agotado el plazo de caminar, el `reason`
+dice a cuantos bloques se ha quedado el bot, que es lo unico que el llamante
+puede corregir.
 
 #### Lo que no se guarda
 
